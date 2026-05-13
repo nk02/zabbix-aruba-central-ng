@@ -7,7 +7,7 @@
   },
   "collector": {
     "interval_seconds": 300,
-    "collect_client_counts": true
+    "collect_client_counts": false
   },
   "workspaces": [
     {
@@ -20,7 +20,7 @@
       "tenant_allowlist": []
     },
     {
-      "name": "WORSPACE STANDALONE",
+      "name": "WORKSPACE STANDALONE",
       "mode": "standalone",
       "workspace_id": "workspace-id",
       "client_id": "client-id",

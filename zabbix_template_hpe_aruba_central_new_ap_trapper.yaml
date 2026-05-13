@@ -16,6 +16,15 @@ zabbix_export:
         - macro: '{$CENTRAL.COLLECTOR.NODATA}'
           value: 15m
           description: 'Time without collector health updates before raising an alert.'
+        - macro: '{$CENTRAL.TAG.AP}'
+          value: ap
+          description: 'Value used for the device_type item tag on discovered access point items.'
+        - macro: '{$CENTRAL.TAG.SWITCH}'
+          value: switch
+          description: 'Value used for the device_type item tag on discovered switch items.'
+        - macro: '{$CENTRAL.TAG.GATEWAY}'
+          value: gateway
+          description: 'Reserved value for the device_type item tag on discovered gateway items.'
       items:
         - uuid: 73ddacbc76ef4db486d466d5a6acaa42
           name: 'Collector health'
@@ -152,6 +161,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 267b4365757c4f7dbf17442285904480
               name: 'AP {#DEVICE_NAME}: status'
               type: DEPENDENT
@@ -170,6 +181,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 2b26f6d5ceef490a992e39c10b4d1af6
               name: 'AP {#DEVICE_NAME}: CPU utilization'
               type: DEPENDENT
@@ -189,6 +202,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: a99fbf017c9a4f28ad22a67606a5a9e6
               name: 'AP {#DEVICE_NAME}: memory utilization'
               type: DEPENDENT
@@ -208,6 +223,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 85ae3016afcd44bda48c2727a993c67e
               name: 'AP {#DEVICE_NAME}: uptime'
               type: DEPENDENT
@@ -230,6 +247,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: c9fedb501c324a73952400996a454d03
               name: 'AP {#DEVICE_NAME}: firmware'
               type: DEPENDENT
@@ -248,6 +267,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 6afcccf7ccab425ea9bd03df565a8c36
               name: 'AP {#DEVICE_NAME}: connected wireless clients'
               type: DEPENDENT
@@ -266,6 +287,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 10ffc5a357554cd4bba3f16d4f4bc569
               name: 'AP {#DEVICE_NAME}: negotiated power'
               type: DEPENDENT
@@ -284,6 +307,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 2e01c8e41f2a4af986d5255ab913801d
               name: 'AP {#DEVICE_NAME}: eth0 status'
               type: DEPENDENT
@@ -302,6 +327,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: b63de2922ef0492bb7d441f9c1bf594d
               name: 'AP {#DEVICE_NAME}: eth0 speed'
               type: DEPENDENT
@@ -324,6 +351,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: adcae9d6625c477ba3639520bf49f64e
               name: 'AP {#DEVICE_NAME}: last reboot reason'
               type: DEPENDENT
@@ -342,6 +371,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
           trigger_prototypes:
             - uuid: 82f6767982604bccbf0404400679169c
               expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"ONLINE"'
@@ -394,6 +425,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 8bd1fd4de57243dcaad2f673cd8bb559
               name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: status'
               type: DEPENDENT
@@ -412,6 +445,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: c7856c3e9d2f4533b5645e345b66515d
               name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: channel utilization'
               type: DEPENDENT
@@ -431,6 +466,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 37bb5dd899014e4789a53d58db8b5923
               name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: noise floor'
               type: DEPENDENT
@@ -450,6 +487,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 0b5b51eff1704c9496a52fa7c416d578
               name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: channel'
               type: DEPENDENT
@@ -468,6 +507,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
             - uuid: 2a0c01b71dbb45848297aac9b804f949
               name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: TX power'
               type: DEPENDENT
@@ -487,6 +528,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.AP}'
           trigger_prototypes:
             - uuid: b618db3c54ce413e8013fbd76d342123
               expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
@@ -530,6 +573,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: 21837228e3e146c9b804c0b4d753399e
               name: 'Switch {#SWITCH_NAME}: status'
               type: DEPENDENT
@@ -548,6 +593,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: 353c5800c46045e5bb8664ddcb04547d
               name: 'Switch {#SWITCH_NAME}: health'
               type: DEPENDENT
@@ -566,6 +613,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: ce649991c9ee402d94115b624e6fbd2d
               name: 'Switch {#SWITCH_NAME}: config status'
               type: DEPENDENT
@@ -584,6 +633,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: 4477b3386a064a5f906f27d779aee676
               name: 'Switch {#SWITCH_NAME}: firmware'
               type: DEPENDENT
@@ -602,6 +653,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: 7354c7cafc51477d8900b12feb5725f4
               name: 'Switch {#SWITCH_NAME}: uptime'
               type: DEPENDENT
@@ -624,6 +677,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
           trigger_prototypes:
             - uuid: 053408082e9240e0be33f06030e14cb1
               expression: 'last(/HPE Aruba Central New AP by trapper/central.switch.status[{#TENANT_ID},{#SWITCH_SERIAL}])<>"ONLINE"'
@@ -660,6 +715,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: 6419783a49824d7786b24b9ad5608174
               name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: status'
               type: DEPENDENT
@@ -678,6 +735,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: f876e6d1365b4c0fafad5ad031054981
               name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: admin status'
               type: DEPENDENT
@@ -696,6 +755,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: 48291f8f7b854127aeaf620dca4f6191
               name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: operational status'
               type: DEPENDENT
@@ -714,6 +775,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
             - uuid: c42bfbd11f124af88a7e541ce9b64e32
               name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: speed'
               type: DEPENDENT
@@ -735,6 +798,8 @@ zabbix_export:
                   value: '{#TENANT_NAME}'
                 - tag: workspace
                   value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{$CENTRAL.TAG.SWITCH}'
       tags:
         - tag: class
           value: network
