@@ -20,7 +20,7 @@ Copia `workspaces.example.json` in `workspaces.json` e compila:
   },
   "workspaces": [
     {
-      "name": "RETI MSP",
+      "name": "workspace-msp-name",
       "mode": "msp",
       "workspace_id": "workspace-id",
       "client_id": "client-id",
@@ -28,7 +28,7 @@ Copia `workspaces.example.json` in `workspaces.json` e compila:
       "central_base_url": "https://de2.api.central.arubanetworks.com"
     },
     {
-      "name": "Cliente diretto",
+      "name": "workspace-standalone-name",
       "mode": "standalone",
       "workspace_id": "workspace-id",
       "client_id": "client-id",
