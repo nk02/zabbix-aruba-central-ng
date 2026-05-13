@@ -11,7 +11,7 @@ Copia `workspaces.example.json` in `workspaces.json` e compila:
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",
-    "host": "HPE Aruba Central RETI",
+    "host": "HPE Aruba Central",
     "sender_path": "zabbix_sender"
   },
   "collector": {
@@ -44,8 +44,6 @@ Modalita':
 - `msp`: token MSP, lista tenant, token exchange per tenant.
 - `standalone`: workspace trattato come tenant singolo.
 
-`workspaces.json` contiene segreti ed e' ignorato da git.
-
 ## Zabbix
 
 Importa il template:
@@ -57,7 +55,7 @@ zabbix_template_hpe_aruba_central_new_ap_trapper.yaml
 Crea un host trapper in Zabbix con lo stesso nome configurato in:
 
 ```json
-"host": "HPE Aruba Central RETI"
+"host": "HPE Aruba Central"
 ```
 
 Associa il template `HPE Aruba Central New AP by trapper` all'host.
