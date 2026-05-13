@@ -802,6 +802,7 @@ def build_ap_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_
             radio_record["ap_serial"] = serial
             radio_record["ap_name"] = ap.get("name")
             radio_record["ap_site_id"] = site_id
+            radio_record["ap_site_name"] = ap.get("site_name")
             radios.append(radio_record)
             lines.append(sender_line(zabbix_host, f"central.ap.radio.raw[{tenant_id},{serial},{radio_number}]", radio_record))
     lines.insert(1, sender_line(zabbix_host, "central.ap.radios.discovery", radios_lld(radios)))
@@ -844,6 +845,8 @@ def build_switch_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zab
             normalized["switch_name"] = switch.get("name")
             normalized["workspace_name"] = switch.get("workspace_name")
             normalized["workspace_id"] = switch.get("workspace_id")
+            normalized["site_id"] = switch.get("site_id")
+            normalized["site_name"] = switch.get("site_name")
             port_index = normalized.get("port_index")
             if port_index is None:
                 continue
@@ -1160,6 +1163,8 @@ def switch_interfaces_lld(interfaces: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#PORT_INDEX}": interface.get("port_index"),
                 "{#PORT_NAME}": interface.get("name"),
                 "{#PORT_CONNECTOR}": interface.get("connector"),
+                "{#SITE_ID}": interface.get("site_id"),
+                "{#SITE_NAME}": interface.get("site_name"),
             }
             for interface in interfaces
             if interface.get("tenant_id")
@@ -1202,6 +1207,8 @@ def radios_lld(radios: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#DEVICE_NAME}": radio.get("ap_name"),
                 "{#RADIO_NUMBER}": radio.get("radio_number"),
                 "{#RADIO_BAND}": radio.get("band"),
+                "{#SITE_ID}": radio.get("ap_site_id"),
+                "{#SITE_NAME}": radio.get("ap_site_name"),
             }
             for radio in radios
             if radio.get("tenant_id") and radio.get("ap_serial") and radio.get("radio_number") is not None

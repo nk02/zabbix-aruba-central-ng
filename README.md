@@ -70,6 +70,7 @@ Gli item scoperti hanno tag:
 
 - `tenant = {#TENANT_NAME}`
 - `workspace = {#WORKSPACE_NAME}`
+- `site = {#SITE_NAME}`
 - `device_type = {#DEVICE_TYPE_TAG}`
 
 Il valore di `{#DEVICE_TYPE_TAG}` viene generato dal collector e si configura in `workspaces.json`, perche' Zabbix non espande le user macro nei valori dei tag degli item prototype LLD.
