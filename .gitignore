@@ -1,0 +1,6 @@
+workspaces.json
+__pycache__/
+*.pyc
+.venv/
+.token_cache.json
+zabbix_sender.exe

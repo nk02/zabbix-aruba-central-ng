@@ -1,0 +1,32 @@
+{
+  "zabbix": {
+    "server": "zabbix.example.com",
+    "port": "10051",
+    "host": "HPE Aruba Central RETI",
+    "sender_path": "zabbix_sender"
+  },
+  "collector": {
+    "interval_seconds": 300,
+    "collect_client_counts": true
+  },
+  "workspaces": [
+    {
+      "name": "RETI MSP",
+      "mode": "msp",
+      "workspace_id": "fd453760-f222-11f0-91b6-0619fdd9aed1",
+      "client_id": "client-id",
+      "client_secret": "client-secret",
+      "central_base_url": "https://de2.api.central.arubanetworks.com",
+      "tenant_allowlist": []
+    },
+    {
+      "name": "Cliente diretto",
+      "mode": "standalone",
+      "workspace_id": "workspace-id",
+      "client_id": "client-id",
+      "client_secret": "client-secret",
+      "central_base_url": "https://de2.api.central.arubanetworks.com"
+    }
+  ]
+}
+

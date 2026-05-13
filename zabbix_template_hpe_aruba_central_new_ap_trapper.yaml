@@ -1,0 +1,634 @@
+zabbix_export:
+  version: '7.0'
+  template_groups:
+    - uuid: 3df659d334944e499deaa7d70c579f6f
+      name: Templates/Network devices
+  templates:
+    - uuid: f42fc68d35654a888ae61f3997c4ed0d
+      template: 'HPE Aruba Central New AP by trapper'
+      name: 'HPE Aruba Central New AP by trapper'
+      description: |
+        Monitors HPE Aruba Networking Central Next Gen access points through an external collector.
+        Designed for Zabbix Cloud: the collector runs outside Zabbix and pushes values with zabbix_sender.
+      groups:
+        - name: Templates/Network devices
+      macros:
+        - macro: '{$CENTRAL.COLLECTOR.NODATA}'
+          value: 15m
+          description: 'Time without collector health updates before raising an alert.'
+      items:
+        - uuid: 73ddacbc76ef4db486d466d5a6acaa42
+          name: 'Collector health'
+          type: TRAP
+          key: central.collector.health
+          history: 7d
+          trends: '0'
+          value_type: TEXT
+          tags:
+            - tag: component
+              value: collector
+          triggers:
+            - uuid: be58be36ee3e4e32a8e4dbb520657dc0
+              expression: 'nodata(/HPE Aruba Central New AP by trapper/central.collector.health,{$CENTRAL.COLLECTOR.NODATA})=1'
+              name: 'HPE Central collector: no data for {$CENTRAL.COLLECTOR.NODATA}'
+              priority: HIGH
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 14c40f79197949c385766f524c0fbd02
+          name: 'Collector status'
+          type: DEPENDENT
+          key: central.collector.status
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.status
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+          triggers:
+            - uuid: 99efa8223a1c47cb960bead71ec1c63b
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.collector.status)<>"ok"'
+              name: 'HPE Central collector: status is not ok'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 7d0e3b4465894da9933e66ce1efd5fed
+          name: 'Collector tenant count'
+          type: DEPENDENT
+          key: central.collector.tenants_count
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.tenants_count
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+        - uuid: 117987cbfd3b4d12aa7896bead407e47
+          name: 'Collector device total'
+          type: DEPENDENT
+          key: central.collector.devices_total
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.devices_total
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+        - uuid: deff2bb833cb43c18b701b846aeb56fa
+          name: 'Collector device counts by type'
+          type: DEPENDENT
+          key: central.collector.device_counts_by_type
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.device_counts_by_type
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+        - uuid: d3ea71a8a71e4059bd829f22fad92b7f
+          name: 'Collector device counts by tenant'
+          type: DEPENDENT
+          key: central.collector.device_counts_by_tenant
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.device_counts_by_tenant
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+        - uuid: 5a93a67df8ea492c96cba847902c46e0
+          name: 'Collector elapsed time'
+          type: DEPENDENT
+          key: central.collector.elapsed_seconds
+          value_type: FLOAT
+          units: s
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.elapsed_seconds
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+      discovery_rules:
+        - uuid: c69fa6a70a39417aaec9d913a27c21ce
+          name: 'HPE Central AP discovery'
+          type: TRAP
+          key: central.aps.discovery
+          lifetime: 7d
+          description: 'Receives AP low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: 390e887acb594b89add38768102113a6
+              name: 'AP {#DEVICE_NAME}: data'
+              type: TRAP
+              key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              history: 1d
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: raw
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+            - uuid: 267b4365757c4f7dbf17442285904480
+              name: 'AP {#DEVICE_NAME}: status'
+              type: DEPENDENT
+              key: 'central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: availability
+            - uuid: 2b26f6d5ceef490a992e39c10b4d1af6
+              name: 'AP {#DEVICE_NAME}: CPU utilization'
+              type: DEPENDENT
+              key: 'central.ap.cpu[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: FLOAT
+              units: '%'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.cpu_utilization
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: cpu
+            - uuid: a99fbf017c9a4f28ad22a67606a5a9e6
+              name: 'AP {#DEVICE_NAME}: memory utilization'
+              type: DEPENDENT
+              key: 'central.ap.memory[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: FLOAT
+              units: '%'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.memory_utilization
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: memory
+            - uuid: 85ae3016afcd44bda48c2727a993c67e
+              name: 'AP {#DEVICE_NAME}: uptime'
+              type: DEPENDENT
+              key: 'central.ap.uptime[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: FLOAT
+              units: s
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.uptime_in_millis
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.001'
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: system
+            - uuid: c9fedb501c324a73952400996a454d03
+              name: 'AP {#DEVICE_NAME}: firmware'
+              type: DEPENDENT
+              key: 'central.ap.firmware[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.firmware
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: inventory
+            - uuid: 6afcccf7ccab425ea9bd03df565a8c36
+              name: 'AP {#DEVICE_NAME}: connected wireless clients'
+              type: DEPENDENT
+              key: 'central.ap.clients_connected[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: UNSIGNED
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.clients_connected
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: clients
+            - uuid: 10ffc5a357554cd4bba3f16d4f4bc569
+              name: 'AP {#DEVICE_NAME}: negotiated power'
+              type: DEPENDENT
+              key: 'central.ap.power[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.negotiated_power
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: power
+            - uuid: 2e01c8e41f2a4af986d5255ab913801d
+              name: 'AP {#DEVICE_NAME}: eth0 status'
+              type: DEPENDENT
+              key: 'central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.ports[?(@.name=="eth0")].status.first()'
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: interface
+            - uuid: b63de2922ef0492bb7d441f9c1bf594d
+              name: 'AP {#DEVICE_NAME}: eth0 speed'
+              type: DEPENDENT
+              key: 'central.ap.eth0.speed[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: UNSIGNED
+              units: bps
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - '$.ports[?(@.name=="eth0")].speed.first()'
+                - type: MULTIPLIER
+                  parameters:
+                    - '1000000'
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: interface
+            - uuid: adcae9d6625c477ba3639520bf49f64e
+              name: 'AP {#DEVICE_NAME}: last reboot reason'
+              type: DEPENDENT
+              key: 'central.ap.last_reboot_reason[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.last_reboot_reason
+              master_item:
+                key: 'central.ap.raw[{#TENANT_ID},{#DEVICE_SERIAL}]'
+              tags:
+                - tag: component
+                  value: system
+          trigger_prototypes:
+            - uuid: 82f6767982604bccbf0404400679169c
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"ONLINE"'
+              name: 'AP {#DEVICE_NAME}: not online'
+              priority: HIGH
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: 6b7dd05d7f574b6ebc84382e9e5a6f4c
+              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.cpu[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
+              name: 'AP {#DEVICE_NAME}: high CPU utilization'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: a2614f7f18e94d4890a0157b01862420
+              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.memory[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
+              name: 'AP {#DEVICE_NAME}: high memory utilization'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: 3d24fb0f011a47d4bcb3a20c99093e4f
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"UP"'
+              name: 'AP {#DEVICE_NAME}: eth0 is not up'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 8c7e883427c24e9ca62b97f1531dd31a
+          name: 'HPE Central AP radio discovery'
+          type: TRAP
+          key: central.ap.radios.discovery
+          lifetime: 7d
+          description: 'Receives AP radio low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: f9bd8f38d8a8449185cfbfde91fbe4c1
+              name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: data'
+              type: TRAP
+              key: 'central.ap.radio.raw[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              history: 1d
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: radio
+                - tag: radio
+                  value: '{#RADIO_BAND}'
+            - uuid: 8bd1fd4de57243dcaad2f673cd8bb559
+              name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: status'
+              type: DEPENDENT
+              key: 'central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+              master_item:
+                key: 'central.ap.radio.raw[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              tags:
+                - tag: component
+                  value: radio
+            - uuid: c7856c3e9d2f4533b5645e345b66515d
+              name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: channel utilization'
+              type: DEPENDENT
+              key: 'central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              value_type: FLOAT
+              units: '%'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.channel_utilization
+              master_item:
+                key: 'central.ap.radio.raw[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              tags:
+                - tag: component
+                  value: radio
+            - uuid: 37bb5dd899014e4789a53d58db8b5923
+              name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: noise floor'
+              type: DEPENDENT
+              key: 'central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              value_type: FLOAT
+              units: dBm
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.noise_floor
+              master_item:
+                key: 'central.ap.radio.raw[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              tags:
+                - tag: component
+                  value: radio
+            - uuid: 0b5b51eff1704c9496a52fa7c416d578
+              name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: channel'
+              type: DEPENDENT
+              key: 'central.ap.radio.channel[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.channel
+              master_item:
+                key: 'central.ap.radio.raw[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              tags:
+                - tag: component
+                  value: radio
+            - uuid: 2a0c01b71dbb45848297aac9b804f949
+              name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: TX power'
+              type: DEPENDENT
+              key: 'central.ap.radio.power[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              value_type: FLOAT
+              units: dBm
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.power_dbm
+              master_item:
+                key: 'central.ap.radio.raw[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              tags:
+                - tag: component
+                  value: radio
+          trigger_prototypes:
+            - uuid: b618db3c54ce413e8013fbd76d342123
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
+              name: 'AP {#DEVICE_NAME}: radio {#RADIO_BAND} is not up'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: a01bfe290a7748c8b7fe5144671e080d
+              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
+              name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} channel utilization'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: performance
+            - uuid: 15e70420bc114b59ae6f52f8893f86d2
+              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
+              name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} noise floor'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: performance
+        - uuid: 30e587fb7eec45bf97407020560e9877
+          name: 'HPE Central switch discovery'
+          type: TRAP
+          key: central.switches.discovery
+          lifetime: 7d
+          description: 'Receives switch low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: 2561e3c547074f56a36c4a03f46fa42e
+              name: 'Switch {#SWITCH_NAME}: data'
+              type: TRAP
+              key: 'central.switch.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              history: 1d
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: raw
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+            - uuid: 21837228e3e146c9b804c0b4d753399e
+              name: 'Switch {#SWITCH_NAME}: status'
+              type: DEPENDENT
+              key: 'central.switch.status[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+              master_item:
+                key: 'central.switch.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: availability
+            - uuid: 353c5800c46045e5bb8664ddcb04547d
+              name: 'Switch {#SWITCH_NAME}: health'
+              type: DEPENDENT
+              key: 'central.switch.health[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.health
+              master_item:
+                key: 'central.switch.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: health
+            - uuid: ce649991c9ee402d94115b624e6fbd2d
+              name: 'Switch {#SWITCH_NAME}: config status'
+              type: DEPENDENT
+              key: 'central.switch.config_status[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.config_status
+              master_item:
+                key: 'central.switch.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: configuration
+            - uuid: 4477b3386a064a5f906f27d779aee676
+              name: 'Switch {#SWITCH_NAME}: firmware'
+              type: DEPENDENT
+              key: 'central.switch.firmware[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.firmware
+              master_item:
+                key: 'central.switch.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: inventory
+            - uuid: 7354c7cafc51477d8900b12feb5725f4
+              name: 'Switch {#SWITCH_NAME}: uptime'
+              type: DEPENDENT
+              key: 'central.switch.uptime[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: FLOAT
+              units: s
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.uptime_in_millis
+                - type: MULTIPLIER
+                  parameters:
+                    - '0.001'
+              master_item:
+                key: 'central.switch.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: system
+          trigger_prototypes:
+            - uuid: 053408082e9240e0be33f06030e14cb1
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.switch.status[{#TENANT_ID},{#SWITCH_SERIAL}])<>"ONLINE"'
+              name: 'Switch {#SWITCH_NAME}: not online'
+              priority: HIGH
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: a03d903a0b7b4f0eac6614f2a1d9f76a
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.switch.health[{#TENANT_ID},{#SWITCH_SERIAL}])<>"Good"'
+              name: 'Switch {#SWITCH_NAME}: health is not good'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: health
+        - uuid: cda9a5f9c03f4497b33a7b95a7d75fb7
+          name: 'HPE Central switch interface discovery'
+          type: TRAP
+          key: central.switch.interfaces.discovery
+          lifetime: 7d
+          description: 'Receives switch interface low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: 4ec5f9cb70b442348277408c61e58ca3
+              name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: data'
+              type: TRAP
+              key: 'central.switch.interface.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              history: 1d
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: interface
+            - uuid: 6419783a49824d7786b24b9ad5608174
+              name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: status'
+              type: DEPENDENT
+              key: 'central.switch.interface.status[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+              master_item:
+                key: 'central.switch.interface.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              tags:
+                - tag: component
+                  value: interface
+            - uuid: f876e6d1365b4c0fafad5ad031054981
+              name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: admin status'
+              type: DEPENDENT
+              key: 'central.switch.interface.admin_status[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.admin_status
+              master_item:
+                key: 'central.switch.interface.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              tags:
+                - tag: component
+                  value: interface
+            - uuid: 48291f8f7b854127aeaf620dca4f6191
+              name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: operational status'
+              type: DEPENDENT
+              key: 'central.switch.interface.oper_status[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.oper_status
+              master_item:
+                key: 'central.switch.interface.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              tags:
+                - tag: component
+                  value: interface
+            - uuid: c42bfbd11f124af88a7e541ce9b64e32
+              name: 'Switch {#SWITCH_NAME} port {#PORT_NAME}: speed'
+              type: DEPENDENT
+              key: 'central.switch.interface.speed[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              value_type: UNSIGNED
+              units: bps
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.speed_bps
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '0'
+              master_item:
+                key: 'central.switch.interface.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#PORT_INDEX}]'
+              tags:
+                - tag: component
+                  value: interface
+      tags:
+        - tag: class
+          value: network
+        - tag: target
+          value: hpe-aruba-central
