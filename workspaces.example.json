@@ -11,16 +11,16 @@
   },
   "workspaces": [
     {
-      "name": "RETI MSP",
+      "name": "WORKSPACE MSP",
       "mode": "msp",
-      "workspace_id": "fd453760-f222-11f0-91b6-0619fdd9aed1",
+      "workspace_id": "workspace-id",
       "client_id": "client-id",
       "client_secret": "client-secret",
       "central_base_url": "https://de2.api.central.arubanetworks.com",
       "tenant_allowlist": []
     },
     {
-      "name": "Cliente diretto",
+      "name": "WORSPACE STANDALONE",
       "mode": "standalone",
       "workspace_id": "workspace-id",
       "client_id": "client-id",
@@ -29,4 +29,3 @@
     }
   ]
 }
-
