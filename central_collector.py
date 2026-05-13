@@ -723,6 +723,40 @@ def sender_line(host: str, key: str, value: Any) -> str:
     return f"{sender_escape(host)} {key} {sender_escape(value)}"
 
 
+def sender_unescape(value: str) -> str:
+    result: list[str] = []
+    escaped = False
+    for char in value:
+        if escaped:
+            result.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        result.append(char)
+    if escaped:
+        result.append("\\")
+    return "".join(result)
+
+
+def parse_sender_line(line: str) -> tuple[str, str, str]:
+    if not line.startswith('"'):
+        raise ValueError(f"Invalid sender line: {line}")
+    host_end = line.find('" ', 1)
+    if host_end < 0:
+        raise ValueError(f"Invalid sender line: {line}")
+    key_start = host_end + 2
+    key_end = line.find(" ", key_start)
+    if key_end < 0 or key_end + 1 >= len(line) or line[key_end + 1] != '"':
+        raise ValueError(f"Invalid sender line: {line}")
+    return (
+        sender_unescape(line[1:host_end]),
+        line[key_start:key_end],
+        sender_unescape(line[key_end + 2 : -1]),
+    )
+
+
 def build_ap_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
     started = time.time()
     aps: list[dict[str, Any]] = []
@@ -841,6 +875,12 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
     zabbix_host = env("ZABBIX_HOST", required=False, default="HPE Aruba Central")
     started = time.time()
     all_lines: list[str] = []
+    discovery_data: dict[str, list[dict[str, Any]]] = {
+        "central.aps.discovery": [],
+        "central.ap.radios.discovery": [],
+        "central.switches.discovery": [],
+        "central.switch.interfaces.discovery": [],
+    }
     workspace_summaries: list[dict[str, Any]] = []
     workspace_count = 0
     tenant_count = 0
@@ -862,8 +902,16 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
             tenants = get_workspace_tenants(msp_token, workspace)
             tenant_count += len(tenants)
             workspace_lines = build_all_sender_lines(msp_token, tenants, zabbix_host)
-            workspace_lines = [line for line in workspace_lines if " central.collector.health " not in line]
-            all_lines.extend(workspace_lines)
+            for line in workspace_lines:
+                _host, key, value = parse_sender_line(line)
+                if key == "central.collector.health":
+                    continue
+                if key in discovery_data:
+                    payload = json.loads(value)
+                    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+                        discovery_data[key].extend(item for item in payload["data"] if isinstance(item, dict))
+                    continue
+                all_lines.append(line)
             inventory = collect_device_inventory_summary(msp_token, tenants)
             summary.update(
                 {
@@ -890,6 +938,12 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
                 }
             )
         workspace_summaries.append(summary)
+
+    discovery_lines = [
+        sender_line(zabbix_host, key, {"data": data})
+        for key, data in discovery_data.items()
+    ]
+    all_lines = discovery_lines + all_lines
 
     health = {
         "status": "ok" if all(item.get("status") == "ok" for item in workspace_summaries) else "degraded",
@@ -1045,6 +1099,7 @@ def tenants_lld(tenants: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "{#TENANT_ID}": tenant.get("id"),
                 "{#TENANT_NAME}": tenant_name(tenant),
+                "{#WORKSPACE_NAME}": tenant.get("_workspace_name") or tenant_name(tenant),
             }
             for tenant in tenants
         ]
@@ -1057,6 +1112,7 @@ def switches_lld(switches: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "{#TENANT_ID}": switch.get("tenant_id"),
                 "{#TENANT_NAME}": switch.get("tenant_name"),
+                "{#WORKSPACE_NAME}": switch.get("workspace_name") or switch.get("tenant_name"),
                 "{#SWITCH_SERIAL}": switch.get("serial"),
                 "{#SWITCH_NAME}": switch.get("name"),
                 "{#SWITCH_MODEL}": switch.get("model"),
@@ -1075,6 +1131,7 @@ def switch_interfaces_lld(interfaces: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "{#TENANT_ID}": interface.get("tenant_id"),
                 "{#TENANT_NAME}": interface.get("tenant_name"),
+                "{#WORKSPACE_NAME}": interface.get("workspace_name") or interface.get("tenant_name"),
                 "{#SWITCH_SERIAL}": interface.get("switch_serial"),
                 "{#SWITCH_NAME}": interface.get("switch_name"),
                 "{#PORT_INDEX}": interface.get("port_index"),
@@ -1095,6 +1152,7 @@ def devices_lld(devices: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "{#TENANT_ID}": device.get("tenant_id"),
                 "{#TENANT_NAME}": device.get("tenant_name"),
+                "{#WORKSPACE_NAME}": device.get("workspace_name") or device.get("tenant_name"),
                 "{#DEVICE_SERIAL}": device.get("serial"),
                 "{#DEVICE_NAME}": device.get("name"),
                 "{#DEVICE_MODEL}": device.get("model"),
@@ -1114,6 +1172,7 @@ def radios_lld(radios: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "{#TENANT_ID}": radio.get("tenant_id"),
                 "{#TENANT_NAME}": radio.get("tenant_name"),
+                "{#WORKSPACE_NAME}": radio.get("workspace_name") or radio.get("tenant_name"),
                 "{#DEVICE_SERIAL}": radio.get("ap_serial"),
                 "{#DEVICE_NAME}": radio.get("ap_name"),
                 "{#RADIO_NUMBER}": radio.get("radio_number"),
