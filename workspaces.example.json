@@ -7,7 +7,12 @@
   },
   "collector": {
     "interval_seconds": 300,
-    "collect_client_counts": false
+    "collect_client_counts": false,
+    "device_type_tags": {
+      "ap": "ap",
+      "switch": "switch",
+      "gateway": "gateway"
+    }
   },
   "workspaces": [
     {

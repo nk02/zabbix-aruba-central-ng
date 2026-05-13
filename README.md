@@ -60,22 +60,19 @@ Crea un host in Zabbix con lo stesso nome configurato in `workspaces.json`:
 
 Associa il template `HPE Aruba Central New AP by trapper` all'host. Gli item trapper e dependent vengono creati dal template; non serve creare item manuali.
 
-Nel template puoi personalizzare le macro:
+Nel template puoi personalizzare la macro:
 
 ```text
 {$CENTRAL.COLLECTOR.NODATA}  default 15m
-{$CENTRAL.TAG.AP}            default ap
-{$CENTRAL.TAG.SWITCH}        default switch
-{$CENTRAL.TAG.GATEWAY}       default gateway
 ```
 
 Gli item scoperti hanno tag:
 
 - `tenant = {#TENANT_NAME}`
 - `workspace = {#WORKSPACE_NAME}`
-- `device_type = valore della macro per AP/switch/gateway`
+- `device_type = {#DEVICE_TYPE_TAG}`
 
-La macro gateway e' gia' presente per coerenza, anche se la raccolta gateway non e' ancora implementata.
+Il valore di `{#DEVICE_TYPE_TAG}` viene generato dal collector e si configura in `workspaces.json`, perche' Zabbix non espande le user macro nei valori dei tag degli item prototype LLD.
 
 ## 3. Collector
 
@@ -104,7 +101,12 @@ Compila `workspaces.json`:
   },
   "collector": {
     "interval_seconds": 300,
-    "collect_client_counts": false
+    "collect_client_counts": false,
+    "device_type_tags": {
+      "ap": "ap",
+      "switch": "switch",
+      "gateway": "gateway"
+    }
   },
   "workspaces": [
     {
@@ -136,6 +138,8 @@ Modalita':
 `tenant_allowlist` e' opzionale: se vuoto monitora tutti i tenant MSP; se valorizzato limita la raccolta a tenant ID o tenant name specifici.
 
 `collect_client_counts` e' disabilitato di default per ridurre chiamate API e tempi di raccolta. Abilitalo solo se vuoi raccogliere il numero di client wireless per AP.
+
+`device_type_tags` definisce i valori usati nel tag `device_type` degli item scoperti. Puoi adeguarli agli standard gia' usati sugli host monitorati localmente, per esempio `access-point`, `network-switch` o altri valori interni. Il valore `gateway` e' gia' previsto per coerenza, anche se la raccolta gateway non e' ancora implementata.
 
 `workspaces.json` contiene segreti ed e' ignorato da git.
 

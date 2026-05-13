@@ -94,6 +94,16 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["COLLECTOR_INTERVAL_SECONDS"] = str(collector["interval_seconds"])
         if collector.get("collect_client_counts") is not None:
             os.environ["HPE_COLLECT_CLIENT_COUNTS"] = "true" if collector["collect_client_counts"] else "false"
+        device_type_tags = collector.get("device_type_tags")
+        if isinstance(device_type_tags, dict):
+            mapping = {
+                "ap": "CENTRAL_TAG_AP",
+                "switch": "CENTRAL_TAG_SWITCH",
+                "gateway": "CENTRAL_TAG_GATEWAY",
+            }
+            for source, target in mapping.items():
+                if device_type_tags.get(source) is not None:
+                    os.environ[target] = str(device_type_tags[source])
 
 
 def config_workspaces(config: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -1106,6 +1116,17 @@ def tenants_lld(tenants: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def device_type_tag(device_type: str) -> str:
+    normalized = device_type.upper()
+    if normalized == "ACCESS_POINT":
+        return env("CENTRAL_TAG_AP", required=False, default="ap")
+    if normalized == "SWITCH":
+        return env("CENTRAL_TAG_SWITCH", required=False, default="switch")
+    if normalized == "GATEWAY":
+        return env("CENTRAL_TAG_GATEWAY", required=False, default="gateway")
+    return device_type.lower()
+
+
 def switches_lld(switches: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "data": [
@@ -1113,6 +1134,7 @@ def switches_lld(switches: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#TENANT_ID}": switch.get("tenant_id"),
                 "{#TENANT_NAME}": switch.get("tenant_name"),
                 "{#WORKSPACE_NAME}": switch.get("workspace_name") or switch.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("SWITCH"),
                 "{#SWITCH_SERIAL}": switch.get("serial"),
                 "{#SWITCH_NAME}": switch.get("name"),
                 "{#SWITCH_MODEL}": switch.get("model"),
@@ -1132,6 +1154,7 @@ def switch_interfaces_lld(interfaces: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#TENANT_ID}": interface.get("tenant_id"),
                 "{#TENANT_NAME}": interface.get("tenant_name"),
                 "{#WORKSPACE_NAME}": interface.get("workspace_name") or interface.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("SWITCH"),
                 "{#SWITCH_SERIAL}": interface.get("switch_serial"),
                 "{#SWITCH_NAME}": interface.get("switch_name"),
                 "{#PORT_INDEX}": interface.get("port_index"),
@@ -1153,6 +1176,7 @@ def devices_lld(devices: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#TENANT_ID}": device.get("tenant_id"),
                 "{#TENANT_NAME}": device.get("tenant_name"),
                 "{#WORKSPACE_NAME}": device.get("workspace_name") or device.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag(str(device.get("device_type") or "")),
                 "{#DEVICE_SERIAL}": device.get("serial"),
                 "{#DEVICE_NAME}": device.get("name"),
                 "{#DEVICE_MODEL}": device.get("model"),
@@ -1173,6 +1197,7 @@ def radios_lld(radios: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#TENANT_ID}": radio.get("tenant_id"),
                 "{#TENANT_NAME}": radio.get("tenant_name"),
                 "{#WORKSPACE_NAME}": radio.get("workspace_name") or radio.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("ACCESS_POINT"),
                 "{#DEVICE_SERIAL}": radio.get("ap_serial"),
                 "{#DEVICE_NAME}": radio.get("ap_name"),
                 "{#RADIO_NUMBER}": radio.get("radio_number"),
