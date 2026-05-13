@@ -1,6 +1,6 @@
 # HPE Aruba Central Next Gen collector for Zabbix Cloud
 
-Collector Python per monitorare HPE Aruba Networking Central Next Gen con API GreenLake e inviare i dati a Zabbix Cloud tramite `zabbix_sender` e item trapper.
+Collector Python per monitorare HPE Aruba Networking Central Next Gen con API GreenLake e inviare i dati a Zabbix tramite `zabbix_sender` e item trapper.
 
 ## Configurazione
 
