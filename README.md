@@ -185,7 +185,7 @@ Modes:
 
 `version_check_enabled` adds collector and template version status to `collector.health`. The collector checks GitHub Contents API and raises update alerts only when a newer version exists.
 
-Collector and template updates are reported through Zabbix health items. The collector does not self-update code or automatically import newer templates; run `import-zabbix-template --apply` and update the collector files during a controlled maintenance window.
+Collector and template updates are reported through Zabbix health items. The collector does not self-update code or automatically import newer templates. Update the collector files first, then run `python .\central_collector.py import-zabbix-template --apply` during a controlled maintenance window.
 
 `unmapped_host_group` is the staging Zabbix host group used when the collector creates new hosts. Keep it as a landing area, then move hosts to the final customer/site groups from Zabbix if needed. The collector does not change host group membership for existing managed hosts.
 
@@ -209,6 +209,24 @@ Do not overwrite your real `workspaces.json` with the example after the first se
 - `config_status.missing_recommended_paths`
 
 If Zabbix raises `local workspaces.json should be reviewed`, compare only the missing paths with `workspaces.example.json` and add the new keys to your existing local file. Missing optional keys still use collector defaults, so collection keeps running.
+
+## Updating
+
+When Zabbix reports that a newer collector or template is available, update the collector files on the machine that runs the daemon:
+
+```powershell
+git pull
+```
+
+If you installed by copying files instead of cloning Git, download the new release and replace `central_collector.py`, `zabbix_template_hpe_aruba_central_new_ap_trapper.yaml`, `README.md`, and `workspaces.example.json`. Keep your local `workspaces.json`.
+
+Then import the bundled Zabbix templates:
+
+```powershell
+python .\central_collector.py import-zabbix-template --apply
+```
+
+Finally restart the daemon or scheduled task so the running collector uses the updated Python code.
 
 ## Commands
 
