@@ -5,8 +5,8 @@ zabbix_export:
     name: Templates/Network devices
   templates:
   - uuid: 1849edd5b861448985393b6038f242dd
-    template: HPE Aruba Central Collector
-    name: HPE Aruba Central Collector
+    template: HPE Aruba Central NG - Collector
+    name: HPE Aruba Central NG - Collector
     description: Collector health, config, version, and subscription items for the
       external HPE Aruba Central collector.
     groups:
@@ -35,7 +35,7 @@ zabbix_export:
         value: collector
       triggers:
       - uuid: ed813e080d974425b5f2c7dc27e2bfda
-        expression: nodata(/HPE Aruba Central Collector/central.collector.health,{$CENTRAL.COLLECTOR.NODATA})=1
+        expression: nodata(/HPE Aruba Central NG - Collector/central.collector.health,{$CENTRAL.COLLECTOR.NODATA})=1
         name: 'HPE Central collector: no data for {$CENTRAL.COLLECTOR.NODATA}'
         priority: HIGH
         tags:
@@ -57,7 +57,7 @@ zabbix_export:
         value: collector
       triggers:
       - uuid: 8a327a9262254ef9b11825b65db28f17
-        expression: last(/HPE Aruba Central Collector/central.collector.status)<>"ok"
+        expression: last(/HPE Aruba Central NG - Collector/central.collector.status)<>"ok"
         name: 'HPE Central collector: status is not ok'
         priority: AVERAGE
         tags:
@@ -136,7 +136,7 @@ zabbix_export:
         value: collector
       triggers:
       - uuid: 9351911b11424187844d5ca99c5d4d25
-        expression: last(/HPE Aruba Central Collector/central.collector.update_status)="outdated"
+        expression: last(/HPE Aruba Central NG - Collector/central.collector.update_status)="outdated"
         name: 'HPE Central collector: newer collector version available on GitHub'
         priority: INFO
         tags:
@@ -158,7 +158,7 @@ zabbix_export:
         value: collector
       triggers:
       - uuid: 18dec9da03f34997b5ee2deeae49de47
-        expression: last(/HPE Aruba Central Collector/central.template.update_status)="outdated"
+        expression: last(/HPE Aruba Central NG - Collector/central.template.update_status)="outdated"
         name: 'HPE Central collector: newer Zabbix template version available on GitHub'
         priority: INFO
         tags:
@@ -180,7 +180,7 @@ zabbix_export:
         value: collector
       triggers:
       - uuid: 203afb98b1134679a3c24b241936e053
-        expression: last(/HPE Aruba Central Collector/central.collector.config_status)<>"current"
+        expression: last(/HPE Aruba Central NG - Collector/central.collector.config_status)<>"current"
         name: 'HPE Central collector: local workspaces.json should be reviewed'
         priority: INFO
         tags:
@@ -266,7 +266,7 @@ zabbix_export:
           value: license
       trigger_prototypes:
       - uuid: 8c6fd23737c9489ab40e92393e95d4f4
-        expression: last(/HPE Aruba Central Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<0
+        expression: last(/HPE Aruba Central NG - Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<0
         name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
           expired'
         priority: HIGH
@@ -274,8 +274,8 @@ zabbix_export:
         - tag: scope
           value: performance
       - uuid: b22b3a82aa2d4530a79f31ce4bb60aa6
-        expression: last(/HPE Aruba Central Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])>=0
-          and last(/HPE Aruba Central Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<={$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}
+        expression: last(/HPE Aruba Central NG - Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])>=0
+          and last(/HPE Aruba Central NG - Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<={$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}
         name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
           expires within {$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS} days'
         priority: WARNING
@@ -283,8 +283,8 @@ zabbix_export:
         - tag: scope
           value: performance
   - uuid: 29e9b9ac0a36463bbded19a0bdb2b59d
-    template: HPE Aruba Central Site
-    name: HPE Aruba Central Site
+    template: HPE Aruba Central NG - Site
+    name: HPE Aruba Central NG - Site
     description: Placeholder for future site-level aggregate HPE Aruba Central items.
     groups:
     - name: Templates/Network devices
@@ -300,8 +300,8 @@ zabbix_export:
       - tag: component
         value: site
   - uuid: 5eee72e75c4a46dbacfac95d92e183cc
-    template: HPE Aruba Central AP
-    name: HPE Aruba Central AP
+    template: HPE Aruba Central NG - AP
+    name: HPE Aruba Central NG - AP
     description: Per-access-point HPE Aruba Central items pushed by the external collector.
     groups:
     - name: Templates/Network devices
@@ -332,7 +332,7 @@ zabbix_export:
         value: availability
       triggers:
       - uuid: d8d43dd5ef1f41479e41a460def2f8f2
-        expression: last(/HPE Aruba Central AP/central.ap.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - AP/central.ap.status)<>"ONLINE"
         name: 'AP: not online'
         priority: HIGH
         tags:
@@ -355,7 +355,7 @@ zabbix_export:
       units: '%'
       triggers:
       - uuid: 0da0fa219fc14473be44af4ec72034ea
-        expression: min(/HPE Aruba Central AP/central.ap.cpu,15m)>85
+        expression: min(/HPE Aruba Central NG - AP/central.ap.cpu,15m)>85
         name: 'AP: high CPU utilization'
         priority: WARNING
         tags:
@@ -378,7 +378,7 @@ zabbix_export:
       units: '%'
       triggers:
       - uuid: a02f330a52444d139489d5acd3139720
-        expression: min(/HPE Aruba Central AP/central.ap.memory,15m)>85
+        expression: min(/HPE Aruba Central NG - AP/central.ap.memory,15m)>85
         name: 'AP: high memory utilization'
         priority: WARNING
         tags:
@@ -450,8 +450,8 @@ zabbix_export:
         value: interface
       triggers:
       - uuid: e650657d65414d3b90fd04b907fec625
-        expression: last(/HPE Aruba Central AP/central.ap.status)="ONLINE"
-          and last(/HPE Aruba Central AP/central.ap.eth0.status)<>"UP"
+        expression: last(/HPE Aruba Central NG - AP/central.ap.status)="ONLINE"
+          and last(/HPE Aruba Central NG - AP/central.ap.eth0.status)<>"UP"
         name: 'AP: eth0 is not up'
         priority: AVERAGE
         tags:
@@ -572,32 +572,32 @@ zabbix_export:
           value: radio
       trigger_prototypes:
       - uuid: 0ae35b01dbfd475ab7e5cbf7529dd31b
-        expression: last(/HPE Aruba Central AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
-          and last(/HPE Aruba Central AP/central.ap.radio.status[{#RADIO_NUMBER}])<>"UP"
+        expression: last(/HPE Aruba Central NG - AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
+          and last(/HPE Aruba Central NG - AP/central.ap.radio.status[{#RADIO_NUMBER}])<>"UP"
         name: 'AP: radio {#RADIO_BAND} is not up'
         priority: AVERAGE
         tags:
         - tag: scope
           value: availability
       - uuid: b30f845d662e487bb7c3c1a3f903dcf7
-        expression: last(/HPE Aruba Central AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
-          and min(/HPE Aruba Central AP/central.ap.radio.channel_utilization[{#RADIO_NUMBER}],15m)>80
+        expression: last(/HPE Aruba Central NG - AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
+          and min(/HPE Aruba Central NG - AP/central.ap.radio.channel_utilization[{#RADIO_NUMBER}],15m)>80
         name: 'AP: high radio {#RADIO_BAND} channel utilization'
         priority: WARNING
         tags:
         - tag: scope
           value: performance
       - uuid: f6dc417cc7484cb4bce9892781f5d5e0
-        expression: last(/HPE Aruba Central AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
-          and min(/HPE Aruba Central AP/central.ap.radio.noise_floor[{#RADIO_NUMBER}],15m)>-85
+        expression: last(/HPE Aruba Central NG - AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
+          and min(/HPE Aruba Central NG - AP/central.ap.radio.noise_floor[{#RADIO_NUMBER}],15m)>-85
         name: 'AP: high radio {#RADIO_BAND} noise floor'
         priority: WARNING
         tags:
         - tag: scope
           value: performance
   - uuid: 86ee6cd7f7ca4c6a86e394b4c160f84e
-    template: HPE Aruba Central Switch
-    name: HPE Aruba Central Switch
+    template: HPE Aruba Central NG - Switch
+    name: HPE Aruba Central NG - Switch
     description: Per-switch HPE Aruba Central items pushed by the external collector.
     groups:
     - name: Templates/Network devices
@@ -628,7 +628,7 @@ zabbix_export:
         value: availability
       triggers:
       - uuid: 579f19068cd1434193576973edc1ec57
-        expression: last(/HPE Aruba Central Switch/central.switch.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - Switch/central.switch.status)<>"ONLINE"
         name: 'Switch: not online'
         priority: HIGH
         tags:
@@ -650,7 +650,7 @@ zabbix_export:
         value: health
       triggers:
       - uuid: 575922e9b8d543ed9a377a5dd862e857
-        expression: last(/HPE Aruba Central Switch/central.switch.health)<>"Good"
+        expression: last(/HPE Aruba Central NG - Switch/central.switch.health)<>"Good"
         name: 'Switch: health is not good'
         priority: AVERAGE
         tags:
@@ -961,8 +961,8 @@ zabbix_export:
         - tag: component
           value: hardware
   - uuid: af88b70b28ba4aad85ae8ebc2fc9b37b
-    template: HPE Aruba Central Gateway
-    name: HPE Aruba Central Gateway
+    template: HPE Aruba Central NG - Gateway
+    name: HPE Aruba Central NG - Gateway
     description: Per-gateway HPE Aruba Central items pushed by the external collector.
     groups:
     - name: Templates/Network devices

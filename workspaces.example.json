@@ -19,11 +19,11 @@
       "gateway": "Gateway"
     },
     "templates": {
-      "collector": "HPE Aruba Central Collector",
-      "site": "HPE Aruba Central Site",
-      "ap": "HPE Aruba Central AP",
-      "switch": "HPE Aruba Central Switch",
-      "gateway": "HPE Aruba Central Gateway"
+      "collector": "HPE Aruba Central NG - Collector",
+      "site": "HPE Aruba Central NG - Site",
+      "ap": "HPE Aruba Central NG - AP",
+      "switch": "HPE Aruba Central NG - Switch",
+      "gateway": "HPE Aruba Central NG - Gateway"
     }
   },
   "collector": {

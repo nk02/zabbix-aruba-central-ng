@@ -2023,11 +2023,11 @@ def zabbix_templates(config: dict[str, Any]) -> dict[str, str]:
     zabbix = config.get("zabbix") if isinstance(config.get("zabbix"), dict) else {}
     templates = zabbix.get("templates") if isinstance(zabbix.get("templates"), dict) else {}
     return {
-        "collector": str(templates.get("collector") or "HPE Aruba Central Collector"),
-        "site": str(templates.get("site") or "HPE Aruba Central Site"),
-        "ap": str(templates.get("ap") or "HPE Aruba Central AP"),
-        "switch": str(templates.get("switch") or "HPE Aruba Central Switch"),
-        "gateway": str(templates.get("gateway") or "HPE Aruba Central Gateway"),
+        "collector": str(templates.get("collector") or "HPE Aruba Central NG - Collector"),
+        "site": str(templates.get("site") or "HPE Aruba Central NG - Site"),
+        "ap": str(templates.get("ap") or "HPE Aruba Central NG - AP"),
+        "switch": str(templates.get("switch") or "HPE Aruba Central NG - Switch"),
+        "gateway": str(templates.get("gateway") or "HPE Aruba Central NG - Gateway"),
     }
 
 
