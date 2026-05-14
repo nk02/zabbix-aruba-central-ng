@@ -158,9 +158,9 @@ Modes:
 
 `alert_mode` controls how alert data is collected:
 
-- `central` (default): collect active alerts from Central APIs.
+- `central`: collect active alerts from Central APIs.
 - `items`: skip Central alert polling; use Zabbix trigger prototypes from collected items if you enable them in the template.
-- `both`: collect Central alerts and allow item-derived trigger prototypes.
+- `both` (temp default): collect Central alerts and allow item-derived trigger prototypes.
 - `none`: do not collect Central alerts. Item-derived trigger prototypes remain disabled unless you enable them in Zabbix.
 
 `version_check_enabled` adds collector and template version status to `collector.health`. The collector checks GitHub Contents API and raises update alerts only when a newer version exists.
