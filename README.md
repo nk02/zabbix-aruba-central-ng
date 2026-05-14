@@ -136,6 +136,7 @@ Example:
   "collector": {
     "interval_seconds": 300,
     "collect_client_counts": false,
+    "auto_import_template": true,
     "lld_settle_seconds": 10,
     "version_check_enabled": true,
     "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
@@ -181,11 +182,13 @@ Modes:
 
 `collect_client_counts` is disabled by default to reduce API calls and collection time. Enable it only if you need wireless client count per AP.
 
+`auto_import_template` imports the bundled local Zabbix template automatically before host synchronization when the installed Zabbix template version is missing or different. It does not download templates from GitHub; update the collector files with `git pull` or a release download first.
+
 `lld_settle_seconds` controls how long `push-all` waits between sending discovery data and sending item values. This reduces first-run failed values while Zabbix creates low-level discovery item prototypes.
 
 `version_check_enabled` adds collector and template version status to `collector.health`. The collector checks GitHub Contents API and raises update alerts only when a newer version exists.
 
-Collector and template updates are reported through Zabbix health items. The collector does not self-update code or automatically import newer templates. Update the collector files first, then run `python .\central_collector.py import-zabbix-template --apply` during a controlled maintenance window.
+Collector and template updates are reported through Zabbix health items. The collector does not self-update code. With `auto_import_template` enabled, template import is automatic after the collector files have been updated locally.
 
 `unmapped_host_group` is the staging Zabbix host group used when the collector creates new hosts. Keep it as a landing area, then move hosts to the final customer/site groups from Zabbix if needed. The collector does not change host group membership for existing managed hosts.
 
@@ -220,7 +223,13 @@ git pull
 
 If you installed by copying files instead of cloning Git, download the new release and replace `central_collector.py`, `zabbix_template_hpe_aruba_central_new_ap_trapper.yaml`, `README.md`, and `workspaces.example.json`. Keep your local `workspaces.json`.
 
-Then import the bundled Zabbix templates:
+Then run one collector cycle or restart the daemon. With `auto_import_template` enabled, the collector imports the bundled Zabbix templates automatically before host synchronization:
+
+```powershell
+python .\central_collector.py push-all
+```
+
+You can still force a template import manually:
 
 ```powershell
 python .\central_collector.py import-zabbix-template --apply

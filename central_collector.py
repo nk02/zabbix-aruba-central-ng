@@ -46,6 +46,7 @@ RECOMMENDED_CONFIG_PATHS = (
     "config_version",
     "collector.interval_seconds",
     "collector.collect_client_counts",
+    "collector.auto_import_template",
     "collector.version_check_enabled",
     "collector.version_check_base_url",
     "collector.version_check_ref",
@@ -117,6 +118,8 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["COLLECTOR_INTERVAL_SECONDS"] = str(collector["interval_seconds"])
         if collector.get("collect_client_counts") is not None:
             os.environ["HPE_COLLECT_CLIENT_COUNTS"] = "true" if collector["collect_client_counts"] else "false"
+        if collector.get("auto_import_template") is not None:
+            os.environ["CENTRAL_AUTO_IMPORT_TEMPLATE"] = "true" if collector["auto_import_template"] else "false"
         if collector.get("lld_settle_seconds") is not None:
             os.environ["CENTRAL_LLD_SETTLE_SECONDS"] = str(collector["lld_settle_seconds"])
         if collector.get("version_check_enabled") is not None:
@@ -1950,6 +1953,7 @@ def summarize_host_sync(result: dict[str, Any]) -> dict[str, Any]:
         "created": result.get("created"),
         "updated": result.get("updated"),
         "reason": result.get("reason"),
+        "template": result.get("template"),
     }
 
 
@@ -1976,6 +1980,45 @@ def zabbix_get_template_ids(template_names: list[str]) -> list[dict[str, str]]:
     if missing:
         raise CentralError(f"Missing Zabbix templates: {', '.join(missing)}")
     return [{"templateid": str(by_name[name])} for name in names]
+
+
+def zabbix_get_template_package_version(config: dict[str, Any]) -> str | None:
+    names = list(zabbix_templates(config).values())
+    templates = zabbix_api_call(
+        "template.get",
+        {
+            "output": ["templateid", "host"],
+            "filter": {"host": names},
+            "selectMacros": ["macro", "value"],
+        },
+    )
+    if not isinstance(templates, list) or not templates:
+        return None
+    versions: list[str] = []
+    for template in templates:
+        for macro in template.get("macros") or []:
+            if isinstance(macro, dict) and macro.get("macro") == "{$CENTRAL.TEMPLATE.VERSION}":
+                value = str(macro.get("value") or "").strip()
+                if value:
+                    versions.append(value)
+    if not versions:
+        return None
+    unique_versions = sorted(set(versions))
+    return unique_versions[0] if len(unique_versions) == 1 else ",".join(unique_versions)
+
+
+def auto_import_zabbix_template_if_needed(config: dict[str, Any]) -> dict[str, Any]:
+    apply_zabbix_config(config)
+    if not env_bool("CENTRAL_AUTO_IMPORT_TEMPLATE", True):
+        return {"status": "disabled", "imported": False}
+    if not env("ZABBIX_API_URL", required=False, default="") or not env("ZABBIX_API_TOKEN", required=False, default=""):
+        return {"status": "skipped", "imported": False, "reason": "missing Zabbix API configuration"}
+    current_version = zabbix_get_template_package_version(config)
+    if current_version == TEMPLATE_VERSION:
+        return {"status": "current", "imported": False, "current": current_version, "expected": TEMPLATE_VERSION}
+    result = import_zabbix_template(config, apply=True)
+    result.update({"status": "imported", "imported": True, "previous": current_version or "", "expected": TEMPLATE_VERSION})
+    return result
 
 
 def zabbix_get_host(host: str) -> dict[str, Any] | None:
@@ -2242,8 +2285,17 @@ def sync_zabbix_hosts_if_configured(config: dict[str, Any]) -> dict[str, Any]:
     apply_zabbix_config(config)
     if not env("ZABBIX_API_URL", required=False, default="") or not env("ZABBIX_API_TOKEN", required=False, default=""):
         return {"status": "skipped", "reason": "missing Zabbix API configuration"}
+    template_result = auto_import_zabbix_template_if_needed(config)
     result = sync_zabbix_hosts(config, apply=True)
     result["status"] = "ok"
+    result["template"] = {
+        "status": template_result.get("status"),
+        "imported": template_result.get("imported"),
+        "current": template_result.get("current"),
+        "previous": template_result.get("previous"),
+        "expected": template_result.get("expected"),
+        "reason": template_result.get("reason"),
+    }
     return result
 
 
