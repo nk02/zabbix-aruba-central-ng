@@ -19,8 +19,11 @@ zabbix_export:
         - macro: '{$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}'
           value: '30'
           description: 'Raise a warning when a subscription expires within this number of days.'
+        - macro: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}'
+          value: '0'
+          description: 'Set to 1 to enable trigger prototypes generated from collected device metric items. Default 0 uses Central API alerts as the primary alert source.'
         - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-          value: 0.4.1 # TEMPLATE_VERSION
+          value: 0.5.0 # TEMPLATE_VERSION
           description: 'Version of this Zabbix template package.'
       items:
         - uuid: 73ddacbc76ef4db486d466d5a6acaa42
@@ -264,7 +267,172 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: update
+        - uuid: 245cdb6bd8fd4398b63cba94832764c5
+          name: 'Central active alerts summary'
+          type: TRAP
+          key: central.alerts.summary
+          history: 7d
+          trends: '0'
+          value_type: TEXT
+          tags:
+            - tag: component
+              value: alerts
+            - tag: source
+              value: central
+        - uuid: 95091df1f0e04b8ca3c79c906127d586
+          name: 'Central active alerts count'
+          type: DEPENDENT
+          key: central.alerts.active_count
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.active_count
+          master_item:
+            key: central.alerts.summary
+          tags:
+            - tag: component
+              value: alerts
+            - tag: source
+              value: central
+          triggers:
+            - uuid: cb58d2a1976042ea9d013ae79c25ff52
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.alerts.active_count)>0 and last(/HPE Aruba Central New AP by trapper/central.alerts.critical_count)=0'
+              name: 'HPE Central: active alerts present'
+              priority: WARNING
+              tags:
+                - tag: scope
+                  value: central-alerts
+        - uuid: 96f47e658d1546a3ac80cf8063471b37
+          name: 'Central active critical alerts count'
+          type: DEPENDENT
+          key: central.alerts.critical_count
+          value_type: UNSIGNED
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.severity_counts.Critical
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '0'
+          master_item:
+            key: central.alerts.summary
+          tags:
+            - tag: component
+              value: alerts
+            - tag: source
+              value: central
+          triggers:
+            - uuid: 429bc4993e764844920690e0718133a0
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.alerts.critical_count)>0'
+              name: 'HPE Central: active critical alerts present'
+              priority: HIGH
+              tags:
+                - tag: scope
+                  value: central-alerts
+        - uuid: 36c754ce8bce413abc4fb5b14c1a120b
+          name: 'Central alert mode'
+          type: DEPENDENT
+          key: central.alerts.mode
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.mode
+          master_item:
+            key: central.alerts.summary
+          tags:
+            - tag: component
+              value: alerts
+            - tag: source
+              value: central
       discovery_rules:
+        - uuid: 9b85ae54c35f4b3bb76ebb872dce8fdb
+          name: 'HPE Central alert discovery'
+          type: TRAP
+          key: central.alerts.discovery
+          lifetime: 7d
+          description: 'Receives active Central alert low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: a801d95979c24f4aa67c0a9f69707fdd
+              name: 'Central alert {#ALERT_NAME}: data'
+              type: TRAP
+              key: 'central.alert.raw[{#TENANT_ID},{#ALERT_ID}]'
+              history: '0'
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: alerts
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: source
+                  value: central
+                - tag: severity
+                  value: '{#ALERT_SEVERITY}'
+                - tag: category
+                  value: '{#ALERT_CATEGORY}'
+                - tag: device_type
+                  value: '{#ALERT_DEVICE_TYPE}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: 4b6361b0e4cf46ec90175aed639cae38
+              name: 'Central alert {#ALERT_NAME}: status'
+              type: DEPENDENT
+              key: 'central.alert.status[{#TENANT_ID},{#ALERT_ID}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+              master_item:
+                key: 'central.alert.raw[{#TENANT_ID},{#ALERT_ID}]'
+              tags:
+                - tag: component
+                  value: alerts
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: source
+                  value: central
+                - tag: severity
+                  value: '{#ALERT_SEVERITY}'
+                - tag: category
+                  value: '{#ALERT_CATEGORY}'
+                - tag: device_type
+                  value: '{#ALERT_DEVICE_TYPE}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: a7a67bbcdb414ddfb521cc871322adf5
+              name: 'Central alert {#ALERT_NAME}: summary'
+              type: DEPENDENT
+              key: 'central.alert.summary[{#TENANT_ID},{#ALERT_ID}]'
+              value_type: TEXT
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.summary
+              master_item:
+                key: 'central.alert.raw[{#TENANT_ID},{#ALERT_ID}]'
+              tags:
+                - tag: component
+                  value: alerts
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: source
+                  value: central
+                - tag: severity
+                  value: '{#ALERT_SEVERITY}'
+                - tag: category
+                  value: '{#ALERT_CATEGORY}'
+                - tag: device_type
+                  value: '{#ALERT_DEVICE_TYPE}'
+                - tag: site
+                  value: '{#SITE_NAME}'
         - uuid: 38779af1b07c484cb01e80a45feaf5ea
           name: 'HPE GreenLake subscription discovery'
           type: TRAP
@@ -697,28 +865,28 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: 82f6767982604bccbf0404400679169c
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"ONLINE"'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"ONLINE"'
               name: 'AP {#DEVICE_NAME}: not online'
               priority: HIGH
               tags:
                 - tag: scope
                   value: availability
             - uuid: 6b7dd05d7f574b6ebc84382e9e5a6f4c
-              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.cpu[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and min(/HPE Aruba Central New AP by trapper/central.ap.cpu[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
               name: 'AP {#DEVICE_NAME}: high CPU utilization'
               priority: WARNING
               tags:
                 - tag: scope
                   value: performance
             - uuid: a2614f7f18e94d4890a0157b01862420
-              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.memory[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and min(/HPE Aruba Central New AP by trapper/central.ap.memory[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
               name: 'AP {#DEVICE_NAME}: high memory utilization'
               priority: WARNING
               tags:
                 - tag: scope
                   value: performance
             - uuid: 3d24fb0f011a47d4bcb3a20c99093e4f
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"UP"'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"UP"'
               name: 'AP {#DEVICE_NAME}: eth0 is not up'
               priority: AVERAGE
               tags:
@@ -888,21 +1056,21 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: b618db3c54ce413e8013fbd76d342123
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
               name: 'AP {#DEVICE_NAME}: radio {#RADIO_BAND} is not up'
               priority: AVERAGE
               tags:
                 - tag: scope
                   value: availability
             - uuid: a01bfe290a7748c8b7fe5144671e080d
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} channel utilization'
               priority: WARNING
               tags:
                 - tag: scope
                   value: performance
             - uuid: 15e70420bc114b59ae6f52f8893f86d2
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} noise floor'
               priority: WARNING
               tags:
@@ -1049,14 +1217,14 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: 053408082e9240e0be33f06030e14cb1
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.switch.status[{#TENANT_ID},{#SWITCH_SERIAL}])<>"ONLINE"'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.switch.status[{#TENANT_ID},{#SWITCH_SERIAL}])<>"ONLINE"'
               name: 'Switch {#SWITCH_NAME}: not online'
               priority: HIGH
               tags:
                 - tag: scope
                   value: availability
             - uuid: a03d903a0b7b4f0eac6614f2a1d9f76a
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.switch.health[{#TENANT_ID},{#SWITCH_SERIAL}])<>"Good"'
+              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.switch.health[{#TENANT_ID},{#SWITCH_SERIAL}])<>"Good"'
               name: 'Switch {#SWITCH_NAME}: health is not good'
               priority: AVERAGE
               tags:
@@ -1170,6 +1338,326 @@ zabbix_export:
               tags:
                 - tag: component
                   value: interface
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+        - uuid: b6e7365db26e4837aed37ff907ec84de
+          name: 'HPE Central switch LAG discovery'
+          type: TRAP
+          key: central.switch.lags.discovery
+          lifetime: 7d
+          description: 'Receives switch LAG low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: 27e3d83694bf4fb38b84195c3b8e5799
+              name: 'Switch {#SWITCH_NAME} LAG {#LAG_NAME}: data'
+              type: TRAP
+              key: 'central.switch.lag.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#LAG_ID}]'
+              history: '0'
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: lag
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: 1d34895a9b814ea7885dbbf89426d202
+              name: 'Switch {#SWITCH_NAME} LAG {#LAG_NAME}: status'
+              type: DEPENDENT
+              key: 'central.switch.lag.status[{#TENANT_ID},{#SWITCH_SERIAL},{#LAG_ID}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: Unknown
+              master_item:
+                key: 'central.switch.lag.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#LAG_ID}]'
+              tags:
+                - tag: component
+                  value: lag
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+        - uuid: 95be964e34ad41f985e49ff948f0a84b
+          name: 'HPE Central switch stack member discovery'
+          type: TRAP
+          key: central.switch.stack_members.discovery
+          lifetime: 7d
+          description: 'Receives switch stack member low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: 0ce6e75751b84f4f830eb10d7ac71bf2
+              name: 'Switch {#SWITCH_NAME} stack member {#STACK_MEMBER_NAME}: data'
+              type: TRAP
+              key: 'central.switch.stack_member.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#STACK_MEMBER_ID}]'
+              history: '0'
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: stack
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: cd61d3c11ecd4dc0b7eea6fd0938f00c
+              name: 'Switch {#SWITCH_NAME} stack member {#STACK_MEMBER_NAME}: status'
+              type: DEPENDENT
+              key: 'central.switch.stack_member.status[{#TENANT_ID},{#SWITCH_SERIAL},{#STACK_MEMBER_ID}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: Unknown
+              master_item:
+                key: 'central.switch.stack_member.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#STACK_MEMBER_ID}]'
+              tags:
+                - tag: component
+                  value: stack
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+        - uuid: 3f9c5e34010b46098a1de31e2f6d1180
+          name: 'HPE Central switch hardware discovery'
+          type: TRAP
+          key: central.switch.hardware.discovery
+          lifetime: 7d
+          description: 'Receives switch hardware category low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: a8f73432afe142f9a5c740671034350f
+              name: 'Switch {#SWITCH_NAME} hardware {#HARDWARE_NAME}: data'
+              type: TRAP
+              key: 'central.switch.hardware.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#HARDWARE_ID}]'
+              history: '0'
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: hardware
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: 02b77fe5e6ca415494082facf385aa65
+              name: 'Switch {#SWITCH_NAME} hardware {#HARDWARE_NAME}: power supply health'
+              type: DEPENDENT
+              key: 'central.switch.hardware.power_supplies_health[{#TENANT_ID},{#SWITCH_SERIAL},{#HARDWARE_ID}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.power_supplies_health
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: Unknown
+              master_item:
+                key: 'central.switch.hardware.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#HARDWARE_ID}]'
+              tags:
+                - tag: component
+                  value: hardware
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: 64ed56b2c9e547d4b47533957588f4a8
+              name: 'Switch {#SWITCH_NAME} hardware {#HARDWARE_NAME}: fan health'
+              type: DEPENDENT
+              key: 'central.switch.hardware.fans_health[{#TENANT_ID},{#SWITCH_SERIAL},{#HARDWARE_ID}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.fans_health
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: Unknown
+              master_item:
+                key: 'central.switch.hardware.raw[{#TENANT_ID},{#SWITCH_SERIAL},{#HARDWARE_ID}]'
+              tags:
+                - tag: component
+                  value: hardware
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+        - uuid: a1330c7e2d0846f7848801d22554d64e
+          name: 'HPE Central switch VSX discovery'
+          type: TRAP
+          key: central.switch.vsx.discovery
+          lifetime: 7d
+          description: 'Receives switch VSX low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: 1feb60afa701449fb5134c1c27011489
+              name: 'Switch {#SWITCH_NAME}: VSX data'
+              type: TRAP
+              key: 'central.switch.vsx.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              history: '0'
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: vsx
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: ae95cb2607164b6da84ad40db62c2e96
+              name: 'Switch {#SWITCH_NAME}: VSX status'
+              type: DEPENDENT
+              key: 'central.switch.vsx.status[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.status
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: Unknown
+              master_item:
+                key: 'central.switch.vsx.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: vsx
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+        - uuid: 8894148bfdd64ea5b7d08fff84d31bcf
+          name: 'HPE Central switch hardware trends discovery'
+          type: TRAP
+          key: central.switch.hardware_trends.discovery
+          lifetime: 7d
+          description: 'Receives switch hardware trend low-level discovery JSON from the external collector.'
+          item_prototypes:
+            - uuid: fce74297890e4b8581bc53c9407f6fc1
+              name: 'Switch {#SWITCH_NAME}: hardware trends data'
+              type: TRAP
+              key: 'central.switch.hardware_trends.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              history: '0'
+              trends: '0'
+              value_type: TEXT
+              tags:
+                - tag: component
+                  value: hardware-trends
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: 6ab3a4009e84426e93b96e846604ad9c
+              name: 'Switch {#SWITCH_NAME}: hardware trend CPU utilization'
+              type: DEPENDENT
+              key: 'central.switch.hardware_trends.cpu[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: FLOAT
+              units: '%'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.cpu_utilization
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '0'
+              master_item:
+                key: 'central.switch.hardware_trends.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: hardware-trends
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: 69a429bc7b9b48b680a64486e097f5fd
+              name: 'Switch {#SWITCH_NAME}: hardware trend memory utilization'
+              type: DEPENDENT
+              key: 'central.switch.hardware_trends.memory[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: FLOAT
+              units: '%'
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.memory_utilization
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '0'
+              master_item:
+                key: 'central.switch.hardware_trends.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: hardware-trends
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
+            - uuid: fe1f9697fd80487ab242267c52f14e10
+              name: 'Switch {#SWITCH_NAME}: hardware trend PoE consumption'
+              type: DEPENDENT
+              key: 'central.switch.hardware_trends.poe_consumption[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              value_type: FLOAT
+              units: W
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.poe_consumption
+                  error_handler: CUSTOM_VALUE
+                  error_handler_params: '0'
+              master_item:
+                key: 'central.switch.hardware_trends.raw[{#TENANT_ID},{#SWITCH_SERIAL}]'
+              tags:
+                - tag: component
+                  value: hardware-trends
                 - tag: tenant
                   value: '{#TENANT_NAME}'
                 - tag: workspace

@@ -8,6 +8,7 @@
   "collector": {
     "interval_seconds": 300,
     "collect_client_counts": false,
+    "alert_mode": "central",
     "version_check_enabled": true,
     "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
     "version_check_ref": "main",

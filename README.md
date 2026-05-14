@@ -9,7 +9,7 @@ The collector runs outside Zabbix, so it also works with Zabbix Cloud where loca
 1. The collector reads one or more GreenLake workspaces from `workspaces.json`.
 2. For each workspace it creates an OAuth access token from `workspace_id`, `client_id`, and `client_secret`.
 3. For MSP workspaces, it discovers MSP tenants and exchanges the MSP token for tenant tokens.
-4. It polls New Central APIs for APs, radios, switches, switch interfaces, and GreenLake subscriptions.
+4. It polls New Central APIs for APs, radios, switches, switch interfaces, switch hardware/stack/LAG/VSX data, Central alerts, and GreenLake subscriptions.
 5. It builds aggregated low-level discovery payloads.
 6. It sends discovery and raw values to one Zabbix trapper host.
 
@@ -42,6 +42,8 @@ Official references:
 - [HPE GreenLake API Authentication](https://developer.greenlake.hpe.com/docs/greenlake/guides/public/authentication/authentication/)
 - [HPE GreenLake Workspace Management](https://developer.greenlake.hpe.com/docs/greenlake/services/workspace/public)
 - [HPE GreenLake Subscription Management](https://developer.greenlake.hpe.com/docs/greenlake/services/subscription-management/public/)
+- [New Central Switch Monitoring APIs](https://developer.arubanetworks.com/new-central/reference/getswitch)
+- [New Central Alerts API](https://developer.arubanetworks.com/new-central/reference/getalertlistv1)
 - [New Central Streaming APIs](https://developer.arubanetworks.com/new-central/docs/streaming-api-getting-started)
 
 ## Zabbix Setup
@@ -64,9 +66,16 @@ Template macros:
 
 ```text
 {$CENTRAL.COLLECTOR.NODATA}                 default 15m
+{$CENTRAL.ITEM.TRIGGERS.ENABLED}            default 0
 {$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}      default 30
 {$CENTRAL.TEMPLATE.VERSION}                 package version
 ```
+
+Alerting modes:
+
+- Default mode uses Central alerts from `GET /network-notifications/v1/alerts`. The collector sends `central.alerts.summary`, alert discovery, and raw active alert items. The template raises a Zabbix problem when active Central alerts are present.
+- Item-derived mode uses trigger prototypes generated from collected AP, radio, and switch metric items. To enable it, set `alert_mode` to `items` or `both` in `workspaces.json` and set Zabbix macro `{$CENTRAL.ITEM.TRIGGERS.ENABLED}` to `1`.
+- `both` collects Central alerts and enables you to use item-derived triggers at the same time. Keep the macro at `0` if you want Central alerts only.
 
 Discovered items include these tags:
 
@@ -106,6 +115,7 @@ Example:
   "collector": {
     "interval_seconds": 300,
     "collect_client_counts": false,
+    "alert_mode": "central",
     "version_check_enabled": true,
     "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
     "version_check_ref": "main",
@@ -145,6 +155,13 @@ Modes:
 `tenant_allowlist` is optional. Leave it empty to monitor all MSP tenants, or list tenant IDs/names to limit collection.
 
 `collect_client_counts` is disabled by default to reduce API calls and collection time. Enable it only if you need wireless client count per AP.
+
+`alert_mode` controls how alert data is collected:
+
+- `central` (default): collect active alerts from Central APIs.
+- `items`: skip Central alert polling; use Zabbix trigger prototypes from collected items if the template macro enables them.
+- `both`: collect Central alerts and allow item-derived trigger prototypes.
+- `none`: do not collect Central alerts and keep item-derived triggers disabled unless you override the template macro.
 
 `version_check_enabled` adds collector and template version status to `collector.health`. The collector checks GitHub Contents API and raises update alerts only when a newer version exists.
 
@@ -243,7 +260,29 @@ central.switches.discovery
 central.switch.raw[<tenant-id>,<serial>]
 central.switch.interfaces.discovery
 central.switch.interface.raw[<tenant-id>,<serial>,<port-index>]
+central.switch.lags.discovery
+central.switch.lag.raw[<tenant-id>,<serial>,<lag-id>]
+central.switch.stack_members.discovery
+central.switch.stack_member.raw[<tenant-id>,<serial>,<member-id>]
+central.switch.hardware.discovery
+central.switch.hardware.raw[<tenant-id>,<serial>,<hardware-id>]
+central.switch.vsx.discovery
+central.switch.vsx.raw[<tenant-id>,<serial>]
+central.switch.hardware_trends.discovery
+central.switch.hardware_trends.raw[<tenant-id>,<serial>]
 ```
+
+Switch optional data is discovered only when Central returns data. For example, standalone switches without VSX or stack membership produce empty VSX/stack discovery payloads. Hardware categories include the component health data exposed by Central, such as fans, power supplies, CPU, memory, and temperature when available.
+
+Central alerts:
+
+```text
+central.alerts.summary
+central.alerts.discovery
+central.alert.raw[<tenant-id>,<alert-id>]
+```
+
+The collector reads active alerts from New Central and aggregates them across all configured workspaces. `central.alerts.summary` includes `active_count`, `severity_counts`, and the active alert list. The raw per-alert items are useful for context; the primary trigger is based on the aggregate active count so it recovers cleanly when Central has no active alerts.
 
 GreenLake subscriptions:
 

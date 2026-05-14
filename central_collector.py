@@ -16,8 +16,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "0.4.1"
-TEMPLATE_VERSION = "0.4.1"
+COLLECTOR_VERSION = "0.5.0"
+TEMPLATE_VERSION = "0.5.0"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -107,6 +107,8 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["CENTRAL_VERSION_CHECK_BASE_URL"] = str(collector["version_check_base_url"])
         if collector.get("version_check_ref") is not None:
             os.environ["CENTRAL_VERSION_CHECK_REF"] = str(collector["version_check_ref"])
+        if collector.get("alert_mode") is not None:
+            os.environ["CENTRAL_ALERT_MODE"] = str(collector["alert_mode"])
         device_type_tags = collector.get("device_type_tags")
         if isinstance(device_type_tags, dict):
             mapping = {
@@ -525,6 +527,26 @@ def get_all_pages(token: str, path: str, query: dict[str, str | int] | None = No
     return all_items
 
 
+def get_all_alert_pages(token: str, query: dict[str, str | int] | None = None) -> list[dict[str, Any]]:
+    params: dict[str, str | int] = {"limit": 100}
+    if query:
+        params.update(query)
+
+    all_items: list[dict[str, Any]] = []
+    next_cursor: Any = params.pop("next", None)
+    while True:
+        page_params = dict(params)
+        if next_cursor:
+            page_params["next"] = next_cursor
+        data = central_get(token, "/network-notifications/v1/alerts", page_params)
+        items = extract_items(data)
+        all_items.extend(items)
+        next_cursor = data.get("next")
+        if not next_cursor or not items:
+            break
+    return all_items
+
+
 def get_greenlake_all_pages(token: str, path: str, query: dict[str, str | int] | None = None) -> list[dict[str, Any]]:
     params: dict[str, str | int] = {"limit": 100, "offset": 0}
     if query:
@@ -668,6 +690,73 @@ def get_switch_interfaces_for_tenant(msp_token: str, tenant: dict[str, Any], ser
         interface["_tenant_id"] = tenant_id
         interface["_switch_serial"] = serial
     return interfaces
+
+
+def get_optional_switch_dict(
+    token: str,
+    path: str,
+    query: dict[str, str | int] | None = None,
+) -> dict[str, Any]:
+    try:
+        return central_get(token, path, query)
+    except CentralError as exc:
+        message = str(exc)
+        if any(code in message for code in ("HTTP 400", "HTTP 404")):
+            return {}
+        raise
+
+
+def get_switch_lag_summary(token: str, serial: str) -> list[dict[str, Any]]:
+    data = get_optional_switch_dict(token, f"/network-monitoring/v1/switches/{serial}/lag")
+    return extract_items(data)
+
+
+def get_switch_stack_members(token: str, serial: str) -> list[dict[str, Any]]:
+    data = get_optional_switch_dict(token, f"/network-monitoring/v1/stack/{serial}/members")
+    return extract_items(data)
+
+
+def get_switch_hardware_categories(token: str, serial: str) -> list[dict[str, Any]]:
+    data = get_optional_switch_dict(token, f"/network-monitoring/v1/switches/{serial}/hardware-categories")
+    return extract_items(data)
+
+
+def get_switch_vsx(token: str, serial: str) -> dict[str, Any]:
+    data = get_optional_switch_dict(token, f"/network-monitoring/v1/switches/{serial}/vsx")
+    if not data:
+        return {}
+    vsx = data.get("vsx") if isinstance(data.get("vsx"), dict) else data
+    if not isinstance(vsx, dict):
+        return {}
+    meaningful = [value for value in vsx.values() if value not in (None, "", [], {})]
+    return vsx if meaningful else {}
+
+
+def get_switch_hardware_trends(token: str, serial: str, site_id: str | None = None) -> dict[str, Any]:
+    query = {"site-id": site_id} if site_id else None
+    data = get_optional_switch_dict(token, f"/network-monitoring/v1/switches/{serial}/hardware-trends", query)
+    return data if data else {}
+
+
+def get_active_alerts_for_tenant(msp_token: str, tenant: dict[str, Any]) -> list[dict[str, Any]]:
+    tenant_id = str(tenant.get("id") or "")
+    if not tenant_id:
+        return []
+    token = tenant_token(msp_token, tenant)
+    try:
+        alerts = get_all_alert_pages(token, {"filter": "status eq 'Active'"})
+    except CentralError as exc:
+        if "HTTP 401" not in str(exc):
+            raise
+        clear_cached_token(f"tenant:{tenant_id}")
+        token = tenant_token(msp_token, tenant, force_refresh=True)
+        alerts = get_all_alert_pages(token, {"filter": "status eq 'Active'"})
+    for alert in alerts:
+        alert["_tenant_id"] = tenant_id
+        alert["_tenant_name"] = tenant_name(tenant)
+        alert["_workspace_id"] = tenant.get("_workspace_id")
+        alert["_workspace_name"] = tenant.get("_workspace_name")
+    return alerts
 
 
 def get_connected_clients_count(token: str, serial: str, site_id: str | None = None) -> int | None:
@@ -847,6 +936,166 @@ def normalize_switch_interface(interface: dict[str, Any]) -> dict[str, Any]:
         "stp_port_state": interface.get("stpPortState"),
         "stp_port_role": interface.get("stpPortRole"),
         "uplink": interface.get("uplink"),
+    }
+
+
+def non_empty(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def normalize_switch_lag(lag: dict[str, Any], switch: dict[str, Any]) -> dict[str, Any]:
+    lag_id = first_value(lag, "id", "name", "lagName", "lagId", "interfaceName")
+    return {
+        "tenant_id": switch.get("tenant_id"),
+        "tenant_name": switch.get("tenant_name"),
+        "workspace_id": switch.get("workspace_id"),
+        "workspace_name": switch.get("workspace_name"),
+        "switch_serial": switch.get("serial"),
+        "switch_name": switch.get("name"),
+        "site_id": switch.get("site_id"),
+        "site_name": switch.get("site_name"),
+        "lag_id": lag_id,
+        "name": first_value(lag, "name", "lagName", "interfaceName", "id"),
+        "status": first_value(lag, "status", "operStatus", "state"),
+        "admin_status": first_value(lag, "adminStatus", "admin_state"),
+        "oper_status": first_value(lag, "operStatus", "oper_state"),
+        "members": lag.get("members") or lag.get("interfaces") or lag.get("ports"),
+        "raw": lag,
+    }
+
+
+def normalize_switch_stack_member(member: dict[str, Any], switch: dict[str, Any]) -> dict[str, Any]:
+    member_id = first_value(member, "id", "stackMemberId", "memberId", "serialNumber", "serial")
+    return {
+        "tenant_id": switch.get("tenant_id"),
+        "tenant_name": switch.get("tenant_name"),
+        "workspace_id": switch.get("workspace_id"),
+        "workspace_name": switch.get("workspace_name"),
+        "switch_serial": switch.get("serial"),
+        "switch_name": switch.get("name"),
+        "site_id": switch.get("site_id"),
+        "site_name": switch.get("site_name"),
+        "member_id": member_id,
+        "serial": first_value(member, "serialNumber", "serial", "id"),
+        "name": first_value(member, "name", "hostname", "deviceName", "serialNumber"),
+        "role": first_value(member, "role", "memberRole", "stackRole"),
+        "status": first_value(member, "status", "state", "health"),
+        "model": first_value(member, "model", "partNumber"),
+        "raw": member,
+    }
+
+
+def normalize_switch_hardware(category: dict[str, Any], switch: dict[str, Any]) -> dict[str, Any]:
+    category_id = first_value(category, "id", "serialNumber", "type", "name")
+    return {
+        "tenant_id": switch.get("tenant_id"),
+        "tenant_name": switch.get("tenant_name"),
+        "workspace_id": switch.get("workspace_id"),
+        "workspace_name": switch.get("workspace_name"),
+        "switch_serial": switch.get("serial"),
+        "switch_name": switch.get("name"),
+        "site_id": switch.get("site_id"),
+        "site_name": switch.get("site_name"),
+        "hardware_id": category_id,
+        "name": first_value(category, "name", "type", "id", "serialNumber"),
+        "type": first_value(category, "type", "category"),
+        "role": category.get("role"),
+        "status": first_value(category, "status", "state"),
+        "cpu_health": nested_first(category, ("cpu", "health")),
+        "memory_health": nested_first(category, ("memory", "health")),
+        "temperature_health": nested_first(category, ("temperature", "health")),
+        "fans_health": nested_first(category, ("fans", "health")),
+        "fans_up_count": nested_first(category, ("fans", "upCount")),
+        "fans_total_count": nested_first(category, ("fans", "totalCount")),
+        "power_supplies_health": nested_first(category, ("powerSupplies", "health")),
+        "power_supplies_up_count": nested_first(category, ("powerSupplies", "upCount")),
+        "power_supplies_total_count": nested_first(category, ("powerSupplies", "totalCount")),
+        "raw": category,
+    }
+
+
+def normalize_switch_vsx(vsx: dict[str, Any], switch: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tenant_id": switch.get("tenant_id"),
+        "tenant_name": switch.get("tenant_name"),
+        "workspace_id": switch.get("workspace_id"),
+        "workspace_name": switch.get("workspace_name"),
+        "switch_serial": switch.get("serial"),
+        "switch_name": switch.get("name"),
+        "site_id": switch.get("site_id"),
+        "site_name": switch.get("site_name"),
+        "role": first_value(vsx, "role", "vsxRole"),
+        "status": first_value(vsx, "status", "state", "operStatus"),
+        "peer_status": first_value(vsx, "peerStatus", "peer_status"),
+        "isl_status": first_value(vsx, "islStatus", "isl_status"),
+        "raw": vsx,
+    }
+
+
+def normalize_switch_hardware_trends(trends: dict[str, Any], switch: dict[str, Any]) -> dict[str, Any]:
+    response = trends.get("response") if isinstance(trends.get("response"), dict) else trends
+    keys = response.get("keys") if isinstance(response.get("keys"), list) else []
+    samples: list[dict[str, Any]] = []
+    metrics = response.get("switchMetrics")
+    if isinstance(metrics, list):
+        for metric in metrics:
+            if isinstance(metric, dict) and isinstance(metric.get("samples"), list):
+                samples.extend(sample for sample in metric["samples"] if isinstance(sample, dict))
+    latest = max(samples, key=lambda item: item.get("timestamp") or 0) if samples else {}
+    latest_data = latest.get("data") if isinstance(latest.get("data"), list) else []
+    values = {str(key): latest_data[index] for index, key in enumerate(keys) if index < len(latest_data)}
+    return {
+        "tenant_id": switch.get("tenant_id"),
+        "tenant_name": switch.get("tenant_name"),
+        "workspace_id": switch.get("workspace_id"),
+        "workspace_name": switch.get("workspace_name"),
+        "switch_serial": switch.get("serial"),
+        "switch_name": switch.get("name"),
+        "site_id": switch.get("site_id"),
+        "site_name": switch.get("site_name"),
+        "timestamp": latest.get("timestamp"),
+        "cpu_utilization": to_float(values.get("cpuUtilization")),
+        "memory_utilization": to_float(values.get("memoryUtilization")),
+        "system_temperature": to_float(values.get("systemTemperature")),
+        "poe_available": to_float(values.get("poeAvailable")),
+        "poe_consumption": to_float(values.get("poeConsumption")),
+        "power_consumption": to_float(values.get("powerConsumption")),
+        "total_power_consumption": to_float(values.get("totalPowerConsumption")),
+        "raw": trends,
+    }
+
+
+def nested_first(data: dict[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = data
+    for part in path:
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
+def normalize_alert(alert: dict[str, Any]) -> dict[str, Any]:
+    alert_id = str(first_value(alert, "id", "key") or "")
+    return {
+        "workspace_id": alert.get("_workspace_id"),
+        "workspace_name": alert.get("_workspace_name"),
+        "tenant_id": alert.get("_tenant_id"),
+        "tenant_name": alert.get("_tenant_name"),
+        "id": alert_id,
+        "name": first_value(alert, "name", "summary", "typeId"),
+        "summary": first_value(alert, "summary", "description", "name"),
+        "severity": alert.get("severity"),
+        "priority": alert.get("priority"),
+        "status": alert.get("status"),
+        "category": alert.get("category"),
+        "device_type": alert.get("deviceType"),
+        "site_id": alert.get("siteId"),
+        "site_name": alert.get("siteName"),
+        "device_id": first_value(alert, "deviceId", "device_id", "serial", "deviceSerial"),
+        "created_at": alert.get("createdAt"),
+        "updated_at": alert.get("updatedAt"),
+        "type_id": first_value(alert, "typeId", "type_id", "key"),
+        "raw": alert,
     }
 
 
@@ -1078,6 +1327,11 @@ def build_switch_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zab
     switches: list[dict[str, Any]] = []
     tenant_by_id = {str(tenant.get("id") or ""): tenant for tenant in tenants}
     interfaces: list[dict[str, Any]] = []
+    lags: list[dict[str, Any]] = []
+    stack_members: list[dict[str, Any]] = []
+    hardware_categories: list[dict[str, Any]] = []
+    hardware_trends: list[dict[str, Any]] = []
+    vsx_details: list[dict[str, Any]] = []
     lines: list[str] = []
 
     for tenant in tenants:
@@ -1091,11 +1345,13 @@ def build_switch_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zab
         site_id = str(switch.get("site_id") or "")
         if not tenant_id or not serial:
             continue
-        detail = normalize_switch_detail(get_switch_detail_for_tenant(msp_token, tenant_by_id[tenant_id], serial, site_id or None))
+        tenant = tenant_by_id[tenant_id]
+        token = tenant_token(msp_token, tenant)
+        detail = normalize_switch_detail(get_switch_detail_for_tenant(msp_token, tenant, serial, site_id or None))
         detail["workspace_name"] = switch.get("workspace_name")
         detail["workspace_id"] = switch.get("workspace_id")
         lines.append(sender_line(zabbix_host, f"central.switch.raw[{tenant_id},{serial}]", detail))
-        for interface in get_switch_interfaces_for_tenant(msp_token, tenant_by_id[tenant_id], serial, site_id or None):
+        for interface in get_switch_interfaces_for_tenant(msp_token, tenant, serial, site_id or None):
             normalized = normalize_switch_interface(interface)
             normalized["tenant_name"] = switch.get("tenant_name")
             normalized["switch_name"] = switch.get("name")
@@ -1109,7 +1365,46 @@ def build_switch_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zab
             interfaces.append(normalized)
             lines.append(sender_line(zabbix_host, f"central.switch.interface.raw[{tenant_id},{serial},{port_index}]", normalized))
 
+        for lag in get_switch_lag_summary(token, serial):
+            normalized_lag = normalize_switch_lag(lag, switch)
+            lag_id = normalized_lag.get("lag_id")
+            if not non_empty(lag_id):
+                continue
+            lags.append(normalized_lag)
+            lines.append(sender_line(zabbix_host, f"central.switch.lag.raw[{tenant_id},{serial},{lag_id}]", normalized_lag))
+
+        for member in get_switch_stack_members(token, serial):
+            normalized_member = normalize_switch_stack_member(member, switch)
+            member_id = normalized_member.get("member_id")
+            if not non_empty(member_id):
+                continue
+            stack_members.append(normalized_member)
+            lines.append(sender_line(zabbix_host, f"central.switch.stack_member.raw[{tenant_id},{serial},{member_id}]", normalized_member))
+
+        for category in get_switch_hardware_categories(token, serial):
+            normalized_category = normalize_switch_hardware(category, switch)
+            hardware_id = normalized_category.get("hardware_id")
+            if not non_empty(hardware_id):
+                continue
+            hardware_categories.append(normalized_category)
+            lines.append(sender_line(zabbix_host, f"central.switch.hardware.raw[{tenant_id},{serial},{hardware_id}]", normalized_category))
+
+        normalized_vsx = normalize_switch_vsx(get_switch_vsx(token, serial), switch)
+        if any(non_empty(normalized_vsx.get(key)) for key in ("role", "status", "peer_status", "isl_status")):
+            vsx_details.append(normalized_vsx)
+            lines.append(sender_line(zabbix_host, f"central.switch.vsx.raw[{tenant_id},{serial}]", normalized_vsx))
+
+        normalized_trends = normalize_switch_hardware_trends(get_switch_hardware_trends(token, serial, site_id or None), switch)
+        if any(non_empty(normalized_trends.get(key)) for key in ("cpu_utilization", "memory_utilization", "system_temperature", "poe_available", "poe_consumption", "power_consumption", "total_power_consumption")):
+            hardware_trends.append(normalized_trends)
+            lines.append(sender_line(zabbix_host, f"central.switch.hardware_trends.raw[{tenant_id},{serial}]", normalized_trends))
+
     lines.insert(1, sender_line(zabbix_host, "central.switch.interfaces.discovery", switch_interfaces_lld(interfaces)))
+    lines.insert(2, sender_line(zabbix_host, "central.switch.lags.discovery", switch_lags_lld(lags)))
+    lines.insert(3, sender_line(zabbix_host, "central.switch.stack_members.discovery", switch_stack_members_lld(stack_members)))
+    lines.insert(4, sender_line(zabbix_host, "central.switch.hardware.discovery", switch_hardware_lld(hardware_categories)))
+    lines.insert(5, sender_line(zabbix_host, "central.switch.vsx.discovery", switch_vsx_lld(vsx_details)))
+    lines.insert(6, sender_line(zabbix_host, "central.switch.hardware_trends.discovery", switch_hardware_trends_lld(hardware_trends)))
     return lines
 
 
@@ -1146,6 +1441,51 @@ def build_license_sender_lines(
     return lines
 
 
+def alert_mode() -> str:
+    mode = env("CENTRAL_ALERT_MODE", required=False, default="central").strip().lower()
+    if mode not in ("central", "items", "both", "none"):
+        raise ConfigError("collector.alert_mode must be one of: central, items, both, none")
+    return mode
+
+
+def build_alert_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
+    mode = alert_mode()
+    if mode not in ("central", "both"):
+        summary = {
+            "mode": mode,
+            "active_count": 0,
+            "severity_counts": {},
+            "alerts": [],
+        }
+        return [sender_line(zabbix_host, "central.alerts.summary", summary), sender_line(zabbix_host, "central.alerts.discovery", {"data": []})]
+
+    alerts: list[dict[str, Any]] = []
+    lines: list[str] = []
+    for tenant in tenants:
+        alerts.extend(normalize_alert(alert) for alert in get_active_alerts_for_tenant(msp_token, tenant))
+
+    severity_counts: dict[str, int] = {}
+    for alert in alerts:
+        severity = str(alert.get("severity") or "Unknown")
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    summary = {
+        "mode": mode,
+        "active_count": len(alerts),
+        "severity_counts": severity_counts,
+        "alerts": alerts,
+    }
+    lines.append(sender_line(zabbix_host, "central.alerts.summary", summary))
+    lines.append(sender_line(zabbix_host, "central.alerts.discovery", alerts_lld(alerts)))
+    for alert in alerts:
+        tenant_id = str(alert.get("tenant_id") or "")
+        alert_id = str(alert.get("id") or "")
+        if not tenant_id or not alert_id:
+            continue
+        lines.append(sender_line(zabbix_host, f"central.alert.raw[{tenant_id},{alert_id}]", alert))
+    return lines
+
+
 def build_all_sender_lines(
     msp_token: str,
     tenants: list[dict[str, Any]],
@@ -1156,6 +1496,7 @@ def build_all_sender_lines(
     ap_lines = build_ap_sender_lines(msp_token, tenants, zabbix_host)
     switch_lines = build_switch_sender_lines(msp_token, tenants, zabbix_host)
     license_lines = build_license_sender_lines(msp_token, workspace or {}, tenants, zabbix_host)
+    alert_lines = build_alert_sender_lines(msp_token, tenants, zabbix_host)
     inventory = collect_device_inventory_summary(msp_token, tenants)
     health = {
         "status": "ok",
@@ -1164,11 +1505,12 @@ def build_all_sender_lines(
         "device_counts_by_type": inventory["device_counts_by_type"],
         "device_counts_by_tenant": inventory["device_counts_by_tenant"],
         "devices_total": inventory["devices_total"],
-        "sent_lines": len(ap_lines) + len(switch_lines) + len(license_lines),
+        "alert_mode": alert_mode(),
+        "sent_lines": len(ap_lines) + len(switch_lines) + len(license_lines) + len(alert_lines),
         "elapsed_seconds": round(time.time() - started, 3),
     }
     return [sender_line(zabbix_host, "central.collector.health", health)] + [
-        line for line in ap_lines + switch_lines + license_lines if " central.collector.health " not in line
+        line for line in ap_lines + switch_lines + license_lines + alert_lines if " central.collector.health " not in line
     ]
 
 
@@ -1188,9 +1530,16 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
         "central.ap.radios.discovery": [],
         "central.switches.discovery": [],
         "central.switch.interfaces.discovery": [],
+        "central.switch.lags.discovery": [],
+        "central.switch.stack_members.discovery": [],
+        "central.switch.hardware.discovery": [],
+        "central.switch.vsx.discovery": [],
+        "central.switch.hardware_trends.discovery": [],
         "central.licenses.discovery": [],
+        "central.alerts.discovery": [],
     }
     workspace_summaries: list[dict[str, Any]] = []
+    active_alerts: list[dict[str, Any]] = []
     workspace_count = 0
     tenant_count = 0
     devices_total = 0
@@ -1214,6 +1563,11 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
             for line in workspace_lines:
                 _host, key, value = parse_sender_line(line)
                 if key == "central.collector.health":
+                    continue
+                if key == "central.alerts.summary":
+                    payload = json.loads(value)
+                    if isinstance(payload, dict) and isinstance(payload.get("alerts"), list):
+                        active_alerts.extend(item for item in payload["alerts"] if isinstance(item, dict))
                     continue
                 if key in discovery_data:
                     payload = json.loads(value)
@@ -1248,11 +1602,22 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
             )
         workspace_summaries.append(summary)
 
+    alert_severity_counts: dict[str, int] = {}
+    for alert in active_alerts:
+        severity = str(alert.get("severity") or "Unknown")
+        alert_severity_counts[severity] = alert_severity_counts.get(severity, 0) + 1
+    alert_summary = {
+        "mode": alert_mode(),
+        "active_count": len(active_alerts),
+        "severity_counts": alert_severity_counts,
+        "alerts": active_alerts,
+    }
+
     discovery_lines = [
         sender_line(zabbix_host, key, {"data": data})
         for key, data in discovery_data.items()
     ]
-    all_lines = discovery_lines + all_lines
+    all_lines = [sender_line(zabbix_host, "central.alerts.summary", alert_summary)] + discovery_lines + all_lines
 
     health = {
         "status": "ok" if all(item.get("status") == "ok" for item in workspace_summaries) else "degraded",
@@ -1260,6 +1625,9 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
         "collector_version": COLLECTOR_VERSION,
         "template_version": TEMPLATE_VERSION,
         "version_status": collect_version_status(),
+        "alert_mode": alert_mode(),
+        "active_alerts_count": len(active_alerts),
+        "active_alerts_by_severity": alert_severity_counts,
         "workspace_count": workspace_count,
         "tenants_count": tenant_count,
         "devices_total": devices_total,
@@ -1473,6 +1841,109 @@ def switch_interfaces_lld(interfaces: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def switch_lags_lld(lags: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "{#TENANT_ID}": lag.get("tenant_id"),
+                "{#TENANT_NAME}": lag.get("tenant_name"),
+                "{#WORKSPACE_NAME}": lag.get("workspace_name") or lag.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("SWITCH"),
+                "{#SWITCH_SERIAL}": lag.get("switch_serial"),
+                "{#SWITCH_NAME}": lag.get("switch_name"),
+                "{#LAG_ID}": lag.get("lag_id"),
+                "{#LAG_NAME}": lag.get("name") or lag.get("lag_id"),
+                "{#SITE_ID}": lag.get("site_id"),
+                "{#SITE_NAME}": lag.get("site_name"),
+            }
+            for lag in lags
+            if lag.get("tenant_id") and lag.get("switch_serial") and non_empty(lag.get("lag_id"))
+        ]
+    }
+
+
+def switch_stack_members_lld(members: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "{#TENANT_ID}": member.get("tenant_id"),
+                "{#TENANT_NAME}": member.get("tenant_name"),
+                "{#WORKSPACE_NAME}": member.get("workspace_name") or member.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("SWITCH"),
+                "{#SWITCH_SERIAL}": member.get("switch_serial"),
+                "{#SWITCH_NAME}": member.get("switch_name"),
+                "{#STACK_MEMBER_ID}": member.get("member_id"),
+                "{#STACK_MEMBER_NAME}": member.get("name") or member.get("serial") or member.get("member_id"),
+                "{#STACK_MEMBER_SERIAL}": member.get("serial"),
+                "{#SITE_ID}": member.get("site_id"),
+                "{#SITE_NAME}": member.get("site_name"),
+            }
+            for member in members
+            if member.get("tenant_id") and member.get("switch_serial") and non_empty(member.get("member_id"))
+        ]
+    }
+
+
+def switch_hardware_lld(categories: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "{#TENANT_ID}": category.get("tenant_id"),
+                "{#TENANT_NAME}": category.get("tenant_name"),
+                "{#WORKSPACE_NAME}": category.get("workspace_name") or category.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("SWITCH"),
+                "{#SWITCH_SERIAL}": category.get("switch_serial"),
+                "{#SWITCH_NAME}": category.get("switch_name"),
+                "{#HARDWARE_ID}": category.get("hardware_id"),
+                "{#HARDWARE_NAME}": category.get("name") or category.get("hardware_id"),
+                "{#HARDWARE_TYPE}": category.get("type"),
+                "{#SITE_ID}": category.get("site_id"),
+                "{#SITE_NAME}": category.get("site_name"),
+            }
+            for category in categories
+            if category.get("tenant_id") and category.get("switch_serial") and non_empty(category.get("hardware_id"))
+        ]
+    }
+
+
+def switch_vsx_lld(vsx_details: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "{#TENANT_ID}": vsx.get("tenant_id"),
+                "{#TENANT_NAME}": vsx.get("tenant_name"),
+                "{#WORKSPACE_NAME}": vsx.get("workspace_name") or vsx.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("SWITCH"),
+                "{#SWITCH_SERIAL}": vsx.get("switch_serial"),
+                "{#SWITCH_NAME}": vsx.get("switch_name"),
+                "{#SITE_ID}": vsx.get("site_id"),
+                "{#SITE_NAME}": vsx.get("site_name"),
+            }
+            for vsx in vsx_details
+            if vsx.get("tenant_id") and vsx.get("switch_serial")
+        ]
+    }
+
+
+def switch_hardware_trends_lld(trends: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "{#TENANT_ID}": trend.get("tenant_id"),
+                "{#TENANT_NAME}": trend.get("tenant_name"),
+                "{#WORKSPACE_NAME}": trend.get("workspace_name") or trend.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": device_type_tag("SWITCH"),
+                "{#SWITCH_SERIAL}": trend.get("switch_serial"),
+                "{#SWITCH_NAME}": trend.get("switch_name"),
+                "{#SITE_ID}": trend.get("site_id"),
+                "{#SITE_NAME}": trend.get("site_name"),
+            }
+            for trend in trends
+            if trend.get("tenant_id") and trend.get("switch_serial")
+        ]
+    }
+
+
 def devices_lld(devices: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "data": [
@@ -1534,6 +2005,28 @@ def licenses_lld(subscriptions: list[dict[str, Any]]) -> dict[str, Any]:
             }
             for subscription in subscriptions
             if subscription.get("license_scope") and subscription.get("owner_id") and subscription.get("id")
+        ]
+    }
+
+
+def alerts_lld(alerts: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "{#TENANT_ID}": alert.get("tenant_id"),
+                "{#TENANT_NAME}": alert.get("tenant_name"),
+                "{#WORKSPACE_NAME}": alert.get("workspace_name") or alert.get("tenant_name"),
+                "{#ALERT_ID}": alert.get("id"),
+                "{#ALERT_NAME}": alert.get("name"),
+                "{#ALERT_SEVERITY}": alert.get("severity"),
+                "{#ALERT_CATEGORY}": alert.get("category"),
+                "{#ALERT_DEVICE_TYPE}": alert.get("device_type"),
+                "{#DEVICE_ID}": alert.get("device_id"),
+                "{#SITE_ID}": alert.get("site_id"),
+                "{#SITE_NAME}": alert.get("site_name"),
+            }
+            for alert in alerts
+            if alert.get("tenant_id") and alert.get("id")
         ]
     }
 
