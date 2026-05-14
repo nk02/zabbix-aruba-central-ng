@@ -713,6 +713,10 @@ def tenant_mapping(workspace: dict[str, Any], tenant: dict[str, Any]) -> dict[st
     return workspace_mapping(workspace) if workspace.get("mode") == "standalone" else {}
 
 
+def mapping_has_host_prefix(mapping: dict[str, Any]) -> bool:
+    return bool(str(mapping.get("host_prefix") or mapping.get("customer_prefix") or "").strip())
+
+
 def unmapped_host_group() -> str:
     return env("ZABBIX_UNMAPPED_HOST_GROUP", required=False, default="HPE Aruba Central/Unmapped")
 
@@ -1731,6 +1735,7 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
     tenant_count = 0
     devices_total = 0
     device_counts_by_type: dict[str, int] = {}
+    unmapped_tenant_mappings: list[dict[str, Any]] = []
 
     for workspace in config_workspaces(config):
         workspace_count += 1
@@ -1746,6 +1751,18 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
             msp_token = get_msp_token()
             tenants = get_workspace_tenants(msp_token, workspace)
             tenant_count += len(tenants)
+            if workspace.get("mode") == "msp":
+                for tenant in tenants:
+                    mapping = tenant_mapping(workspace, tenant)
+                    if not mapping_has_host_prefix(mapping):
+                        unmapped_tenant_mappings.append(
+                            {
+                                "workspace_name": workspace.get("name"),
+                                "workspace_id": workspace.get("workspace_id"),
+                                "tenant_id": tenant.get("id"),
+                                "tenant_name": tenant_name(tenant),
+                            }
+                        )
             workspace_lines = build_all_sender_lines(msp_token, tenants, zabbix_host, workspace)
             for line in workspace_lines:
                 _host, key, value = parse_sender_line(line)
@@ -1802,6 +1819,8 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
         "devices_total": devices_total,
         "device_counts_by_type": device_counts_by_type,
         "device_counts_by_workspace": workspace_summaries,
+        "unmapped_tenant_mappings_count": len(unmapped_tenant_mappings),
+        "unmapped_tenant_mappings": unmapped_tenant_mappings,
         "sent_lines": len(all_lines) + 1,
         "elapsed_seconds": round(time.time() - started, 3),
     }
@@ -1923,6 +1942,16 @@ def zabbix_sender_stderr(result: dict[str, Any]) -> str:
     return f"discovery={discovery.get('stderr')!r} values={values.get('stderr')!r}"
 
 
+def summarize_host_sync(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": result.get("status"),
+        "planned": result.get("planned"),
+        "created": result.get("created"),
+        "updated": result.get("updated"),
+        "reason": result.get("reason"),
+    }
+
+
 def zabbix_get_or_create_hostgroup(name: str, apply: bool = False) -> dict[str, Any]:
     groups = zabbix_api_call("hostgroup.get", {"output": ["groupid", "name"], "filter": {"name": [name]}})
     if isinstance(groups, list) and groups:
@@ -1954,12 +1983,27 @@ def zabbix_get_host(host: str) -> dict[str, Any] | None:
         {
             "output": ["hostid", "host", "name"],
             "selectTags": "extend",
+            "selectParentTemplates": ["templateid", "host"],
             "filter": {"host": [host]},
         },
     )
     if isinstance(hosts, list) and hosts:
         return hosts[0]
     return None
+
+
+def zabbix_tags_equal(current: Any, desired: list[dict[str, str]]) -> bool:
+    if not isinstance(current, list):
+        current = []
+    current_pairs = {(str(item.get("tag") or ""), str(item.get("value") or "")) for item in current if isinstance(item, dict)}
+    desired_pairs = {(str(item.get("tag") or ""), str(item.get("value") or "")) for item in desired}
+    return current_pairs == desired_pairs
+
+
+def zabbix_template_names(current: Any) -> set[str]:
+    if not isinstance(current, list):
+        return set()
+    return {str(item.get("host") or "") for item in current if isinstance(item, dict) and item.get("host")}
 
 
 def zabbix_ensure_host(plan: dict[str, Any], apply: bool = False) -> dict[str, Any]:
@@ -1998,9 +2042,25 @@ def zabbix_ensure_host(plan: dict[str, Any], apply: bool = False) -> dict[str, A
             "hostid": existing["hostid"],
             "name": plan.get("visible_name") or plan["host"],
         }
+        current_template_names = zabbix_template_names(existing.get("parentTemplates"))
+        desired_template_names = {str(item) for item in plan.get("templates") or []}
+        needs_update = (
+            str(existing.get("name") or "") != str(plan.get("visible_name") or plan["host"])
+            or not zabbix_tags_equal(existing.get("tags"), desired_tags)
+            or not desired_template_names.issubset(current_template_names)
+        )
+        if not needs_update:
+            result["pending"] = False
+            return result
         params["tags"] = desired_tags
         if templates:
-            params["templates"] = templates
+            existing_templates = [
+                {"templateid": str(item.get("templateid"))}
+                for item in existing.get("parentTemplates") or []
+                if isinstance(item, dict) and item.get("templateid")
+            ]
+            merged_templates = {item["templateid"]: item for item in existing_templates + templates}
+            params["templates"] = list(merged_templates.values())
         zabbix_api_call("host.update", params)
         result["updated"] = True
         result["pending"] = False
@@ -2136,6 +2196,15 @@ def sync_zabbix_hosts(config: dict[str, Any], apply: bool = False) -> dict[str, 
     }
 
 
+def sync_zabbix_hosts_if_configured(config: dict[str, Any]) -> dict[str, Any]:
+    apply_zabbix_config(config)
+    if not env("ZABBIX_API_URL", required=False, default="") or not env("ZABBIX_API_TOKEN", required=False, default=""):
+        return {"status": "skipped", "reason": "missing Zabbix API configuration"}
+    result = sync_zabbix_hosts(config, apply=True)
+    result["status"] = "ok"
+    return result
+
+
 def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
     apply_zabbix_config(config)
     path = Path(__file__).with_name("zabbix_template_hpe_aruba_central_new_ap_trapper.yaml")
@@ -2206,6 +2275,7 @@ def run_daemon(command: str, interval_seconds: int) -> None:
         try:
             config = load_json_config()
             if command == "push-all":
+                sync_result = sync_zabbix_hosts_if_configured(config)
                 lines = build_all_config_sender_lines(config)
             else:
                 apply_zabbix_config(config)
@@ -2227,6 +2297,7 @@ def run_daemon(command: str, interval_seconds: int) -> None:
             log_line(
                 f"{level} command={command} sent_lines={result.get('sent_lines')} "
                 f"returncode={result.get('returncode')} elapsed={round(time.time() - started, 3)}s "
+                f"host_sync={summarize_host_sync(sync_result) if command == 'push-all' else 'not-applicable'} "
                 f"stdout={zabbix_sender_stdout(result)!r} stderr={zabbix_sender_stderr(result)!r}"
             )
         except Exception as exc:
@@ -2603,6 +2674,8 @@ def main() -> int:
         return 0
 
     if args.command == "push-all":
+        if not args.dry_run:
+            sync_zabbix_hosts_if_configured(config)
         lines = build_all_config_sender_lines(config)
         if args.dry_run:
             print("\n".join(lines))

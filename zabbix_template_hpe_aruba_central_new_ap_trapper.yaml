@@ -200,6 +200,42 @@ zabbix_export:
       tags:
       - tag: component
         value: collector
+    - uuid: 450d51da32854d919f4ee75a72e740c4
+      name: Collector unmapped MSP tenant mappings count
+      type: DEPENDENT
+      key: central.collector.unmapped_tenant_mappings_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.unmapped_tenant_mappings_count
+      master_item:
+        key: central.collector.health
+      tags:
+      - tag: component
+        value: collector
+      triggers:
+      - uuid: 43f07fcec19e47018e2c1452064ce248
+        expression: last(/HPE Aruba Central NG - Collector/central.collector.unmapped_tenant_mappings_count)>0
+        name: 'HPE Central collector: MSP tenants need workspace mapping'
+        priority: INFO
+        tags:
+        - tag: scope
+          value: notice
+    - uuid: c8b75cf24991470885a3fb9811337214
+      name: Collector unmapped MSP tenant mappings
+      type: DEPENDENT
+      key: central.collector.unmapped_tenant_mappings
+      value_type: TEXT
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.unmapped_tenant_mappings
+      master_item:
+        key: central.collector.health
+      tags:
+      - tag: component
+        value: collector
     discovery_rules:
     - uuid: 2f6459e3c7024a9f87beb2352328406d
       name: HPE GreenLake subscription discovery

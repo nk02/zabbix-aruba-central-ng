@@ -264,6 +264,8 @@ Send to Zabbix:
 python .\central_collector.py push-all
 ```
 
+`push-all` synchronizes collector, site, and device hosts through the Zabbix API before sending values. New devices discovered in Central are therefore created automatically before `zabbix_sender` runs. Hosts for devices removed from Central are not deleted automatically; remove or disable those managed hosts manually after confirming they are no longer needed.
+
 Run continuously:
 
 ```powershell
