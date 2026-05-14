@@ -72,9 +72,9 @@ Template macros:
 
 Alerting modes:
 
-- Default mode uses Central alerts from `GET /network-notifications/v1/alerts`. The collector sends `central.alerts.summary`, alert discovery, and raw active alert items. The template raises a Zabbix problem when active Central alerts are present.
+- Central mode uses Central alerts from `GET /network-notifications/v1/alerts`. The collector sends `central.alerts.summary`, alert discovery, and raw active alert items. The template raises a Zabbix problem when active Central alerts are present.
 - Item-derived trigger prototypes for AP, radio, and switch metrics are included in the same template but imported disabled by default. Enable them in Zabbix only if you want Zabbix to generate problems from collected metric items.
-- `both` collects Central alerts and lets you also enable item-derived trigger prototypes in Zabbix.
+- `both` (temp default) collects Central alerts and lets you also enable item-derived trigger prototypes in Zabbix.
 
 Discovered items include these tags:
 
