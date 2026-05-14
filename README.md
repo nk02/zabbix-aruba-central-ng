@@ -266,7 +266,7 @@ python .\central_collector.py push-all
 
 `push-all` synchronizes collector, site, and device hosts through the Zabbix API before sending values. New devices discovered in Central are therefore created automatically before `zabbix_sender` runs. Hosts for devices removed from Central are not deleted automatically; remove or disable those managed hosts manually after confirming they are no longer needed.
 
-The collector also reports managed Zabbix hosts that are no longer discovered in Central through `central.collector.stale_managed_hosts_count` and `central.collector.stale_managed_hosts`. This raises a warning so old hosts can be reviewed without deleting anything automatically.
+The collector also reports managed Zabbix hosts that are no longer discovered in Central through `central.collector.stale_managed_hosts_count`, `central.collector.stale_managed_host_names`, and `central.collector.stale_managed_hosts`. This raises a warning with the stale host names in operational data, so old hosts can be reviewed without deleting anything automatically.
 
 Run continuously:
 

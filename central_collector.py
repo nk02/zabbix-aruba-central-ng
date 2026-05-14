@@ -2029,6 +2029,7 @@ def collect_zabbix_managed_hosts_status(config: dict[str, Any], plans: list[dict
         "managed_hosts_count": len(managed_hosts),
         "planned_hosts_count": len(planned_hosts),
         "stale_hosts_count": len(stale_hosts),
+        "stale_host_names": ", ".join(str(host.get("host") or "") for host in stale_hosts if host.get("host")),
         "stale_hosts": stale_hosts,
     }
 

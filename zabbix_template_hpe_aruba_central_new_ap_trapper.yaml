@@ -253,11 +253,27 @@ zabbix_export:
       triggers:
       - uuid: 234e60f5599c4f6a95a83c8face0b8e1
         expression: last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_hosts_count)>0
+          and length(last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_host_names))>=0
         name: 'HPE Central collector: managed Zabbix hosts are no longer discovered in Central'
+        opdata: 'Stale hosts: {ITEM.LASTVALUE2}'
         priority: WARNING
         tags:
         - tag: scope
           value: notice
+    - uuid: 911317a09f81474cb2af87cb21fb69a1
+      name: Collector stale managed host names
+      type: DEPENDENT
+      key: central.collector.stale_managed_host_names
+      value_type: TEXT
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.zabbix_managed_hosts_status.stale_host_names
+      master_item:
+        key: central.collector.health
+      tags:
+      - tag: component
+        value: collector
     - uuid: 6090b1435d9b47bca942832de4c0e207
       name: Collector stale managed hosts
       type: DEPENDENT
@@ -452,6 +468,7 @@ zabbix_export:
       - uuid: a02f330a52444d139489d5acd3139720
         expression: min(/HPE Aruba Central NG - AP/central.ap.memory,15m)>85
         name: 'AP: high memory utilization'
+        status: DISABLED
         priority: WARNING
         tags:
         - tag: scope
