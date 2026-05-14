@@ -1,5 +1,5 @@
 {
-  "config_version": "1.0.1",
+  "config_version": "1.0.2",
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",

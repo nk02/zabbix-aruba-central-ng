@@ -64,7 +64,7 @@ The collector can create and update host groups and hosts through the Zabbix API
 Template macros:
 
 ```text
-{$CENTRAL.COLLECTOR.NODATA}                 default 15m
+{$CENTRAL.COLLECTOR.NODATA}                 default 10m
 {$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}      default 30
 {$CENTRAL.TEMPLATE.VERSION}                 package version
 ```
@@ -106,7 +106,7 @@ Example:
 
 ```json
 {
-  "config_version": "1.0.1",
+  "config_version": "1.0.2",
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",

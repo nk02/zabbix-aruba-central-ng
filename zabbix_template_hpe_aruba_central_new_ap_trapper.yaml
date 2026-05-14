@@ -13,14 +13,14 @@ zabbix_export:
     - name: Templates/Network devices
     macros:
     - macro: '{$CENTRAL.COLLECTOR.NODATA}'
-      value: 15m
+      value: 10m
       description: Time without collector health updates before raising an alert.
     - macro: '{$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}'
       value: '30'
       description: Raise a warning when a subscription expires within this number
         of days.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 1.0.1
+      value: 1.0.2
       description: Version of this Zabbix template package.
     items:
     - uuid: 4e57de4d770d43a2bbc53933328a8b43
@@ -254,7 +254,7 @@ zabbix_export:
       - uuid: 234e60f5599c4f6a95a83c8face0b8e1
         expression: last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_hosts_count)>0
           and length(last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_host_names))>=0
-        name: 'HPE Central collector: managed Zabbix hosts are no longer discovered in Central'
+        name: 'HPE Central collector: stale managed hosts: {ITEM.LASTVALUE2}'
         event_name: 'HPE Central collector: stale managed hosts: {ITEM.LASTVALUE2}'
         opdata: 'Stale hosts: {ITEM.LASTVALUE2}'
         priority: WARNING
