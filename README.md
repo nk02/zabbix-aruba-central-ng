@@ -106,6 +106,7 @@ Example:
 
 ```json
 {
+  "config_version": "0.5.1",
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",
@@ -168,6 +169,15 @@ Modes:
 `device_type_tags` defines the value used in the `device_type` Zabbix tag. Adjust it to match your local monitoring standards.
 
 `workspaces.json` contains secrets and is ignored by Git.
+
+Do not overwrite your real `workspaces.json` with the example after the first setup. The example file is versioned and may gain new recommended settings over time. The collector reports config drift through `collector.health`:
+
+- `config_status.status`
+- `config_status.current`
+- `config_status.expected`
+- `config_status.missing_recommended_paths`
+
+If Zabbix raises `local workspaces.json should be reviewed`, compare only the missing paths with `workspaces.example.json` and add the new keys to your existing local file. Missing optional keys still use collector defaults, so collection keeps running.
 
 ## Commands
 
@@ -303,6 +313,7 @@ The collector monitors only non-evaluation active subscription keys (`isEval=fal
 - `collector_version`
 - `template_version`
 - `version_status`
+- `config_status`
 - `sent_lines`
 - `elapsed_seconds`
 

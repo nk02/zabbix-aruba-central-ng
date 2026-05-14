@@ -16,8 +16,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "0.5.0"
-TEMPLATE_VERSION = "0.5.0"
+COLLECTOR_VERSION = "0.5.1"
+TEMPLATE_VERSION = "0.5.1"
+CONFIG_SCHEMA_VERSION = "0.5.1"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -41,6 +42,18 @@ CENTRAL_BASE_URLS = [
     "https://au1.api.central.arubanetworks.com",
     "https://ae1.api.central.arubanetworks.com",
 ]
+RECOMMENDED_CONFIG_PATHS = (
+    "config_version",
+    "collector.interval_seconds",
+    "collector.collect_client_counts",
+    "collector.alert_mode",
+    "collector.version_check_enabled",
+    "collector.version_check_base_url",
+    "collector.version_check_ref",
+    "collector.device_type_tags.ap",
+    "collector.device_type_tags.switch",
+    "collector.device_type_tags.gateway",
+)
 
 
 class CentralError(RuntimeError):
@@ -223,6 +236,39 @@ def compare_versions(current: str, latest: str) -> str:
     if current_parts > latest_parts:
         return "newer"
     return "current"
+
+
+def config_path_exists(config: dict[str, Any], path: str) -> bool:
+    value: Any = config
+    for part in path.split("."):
+        if not isinstance(value, dict) or part not in value:
+            return False
+        value = value[part]
+    return True
+
+
+def collect_config_status(config: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        return {
+            "status": "missing",
+            "current": "",
+            "expected": CONFIG_SCHEMA_VERSION,
+            "missing_recommended_paths": list(RECOMMENDED_CONFIG_PATHS),
+        }
+    current = str(config.get("config_version") or "")
+    if not current:
+        version_status = "missing"
+    else:
+        version_status = compare_versions(current, CONFIG_SCHEMA_VERSION)
+    missing_paths = [path for path in RECOMMENDED_CONFIG_PATHS if not config_path_exists(config, path)]
+    status = "current" if version_status in ("current", "newer") and not missing_paths else "outdated"
+    return {
+        "status": status,
+        "current": current,
+        "expected": CONFIG_SCHEMA_VERSION,
+        "version_status": version_status,
+        "missing_recommended_paths": missing_paths,
+    }
 
 
 def request_text(url: str, timeout: int = VERSION_CHECK_TIMEOUT_SECONDS) -> str:
@@ -1625,6 +1671,7 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
         "collector_version": COLLECTOR_VERSION,
         "template_version": TEMPLATE_VERSION,
         "version_status": collect_version_status(),
+        "config_status": collect_config_status(config),
         "alert_mode": alert_mode(),
         "active_alerts_count": len(active_alerts),
         "active_alerts_by_severity": alert_severity_counts,
@@ -2071,6 +2118,7 @@ def main() -> int:
         output_json(
             {
                 "status": "ok",
+                "config_status": collect_config_status(config),
                 "workspace_count": len(workspaces),
                 "workspaces": [
                     {

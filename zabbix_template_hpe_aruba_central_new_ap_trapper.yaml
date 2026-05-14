@@ -23,7 +23,7 @@ zabbix_export:
           value: '0'
           description: 'Set to 1 to enable trigger prototypes generated from collected device metric items. Default 0 uses Central API alerts as the primary alert source.'
         - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-          value: 0.5.0 # TEMPLATE_VERSION
+          value: 0.5.1 # TEMPLATE_VERSION
           description: 'Version of this Zabbix template package.'
       items:
         - uuid: 73ddacbc76ef4db486d466d5a6acaa42
@@ -155,6 +155,81 @@ zabbix_export:
               value: collector
             - tag: scope
               value: update
+        - uuid: 42a0f13b96734559aafa819ca5a0badb
+          name: 'Collector config status'
+          type: DEPENDENT
+          key: central.collector.config_status
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.config_status.status
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: config
+          triggers:
+            - uuid: 19db1ed60d7d45f4a923e28d9c0c3fb5
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.collector.config_status)<>"current"'
+              name: 'HPE Central collector: local workspaces.json should be reviewed'
+              priority: INFO
+              tags:
+                - tag: scope
+                  value: config
+        - uuid: d700522630654f82b5abeb7222225df5
+          name: 'Collector config expected version'
+          type: DEPENDENT
+          key: central.collector.config_expected_version
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.config_status.expected
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: config
+        - uuid: c45c94557bf14aef948c8c87269d133e
+          name: 'Collector config current version'
+          type: DEPENDENT
+          key: central.collector.config_current_version
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.config_status.current
+              error_handler: CUSTOM_VALUE
+              error_handler_params: unknown
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: config
+        - uuid: 72833056160a4390bf4923becbaffe30
+          name: 'Collector config missing recommended paths'
+          type: DEPENDENT
+          key: central.collector.config_missing_recommended_paths
+          trends: '0'
+          value_type: TEXT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.config_status.missing_recommended_paths
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: config
         - uuid: afeed5a8b56b44f4b3c38604fd617fac
           name: 'Collector version'
           type: DEPENDENT
