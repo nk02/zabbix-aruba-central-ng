@@ -74,7 +74,7 @@ Alerting modes:
 
 - Central mode uses Central alerts from `GET /network-notifications/v1/alerts`. The collector sends `central.alerts.summary`, alert discovery, and raw active alert items. The template raises a Zabbix problem when active Central alerts are present.
 - Item-derived trigger prototypes for AP, radio, and switch metrics are included in the same template but imported disabled by default. Enable them in Zabbix only if you want Zabbix to generate problems from collected metric items.
-- `both` (temp default) collects Central alerts and lets you also enable item-derived trigger prototypes in Zabbix.
+- `both` collects Central alerts and lets you also enable item-derived trigger prototypes in Zabbix.
 
 Discovered items include these tags:
 
@@ -159,8 +159,8 @@ Modes:
 `alert_mode` controls how alert data is collected:
 
 - `central`: collect active alerts from Central APIs.
-- `items`: skip Central alert polling; use Zabbix trigger prototypes from collected items if you enable them in the template.
-- `both` (temp default): collect Central alerts and allow item-derived trigger prototypes.
+- `items` (temp default): skip Central alert polling; use Zabbix trigger prototypes from collected items if you enable them in the template.
+- `both`: collect Central alerts and allow item-derived trigger prototypes.
 - `none`: do not collect Central alerts. Item-derived trigger prototypes remain disabled unless you enable them in Zabbix.
 
 `version_check_enabled` adds collector and template version status to `collector.health`. The collector checks GitHub Contents API and raises update alerts only when a newer version exists.
