@@ -3,6 +3,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
+COLLECTOR_VERSION = "0.2.0"
+TEMPLATE_VERSION = "0.2.0"
+GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng/main"
+VERSION_CHECK_TIMEOUT_SECONDS = 5
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
 TENANTS_PATH = "/workspaces/v1/msp-tenants"
@@ -94,6 +99,10 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["COLLECTOR_INTERVAL_SECONDS"] = str(collector["interval_seconds"])
         if collector.get("collect_client_counts") is not None:
             os.environ["HPE_COLLECT_CLIENT_COUNTS"] = "true" if collector["collect_client_counts"] else "false"
+        if collector.get("version_check_enabled") is not None:
+            os.environ["CENTRAL_VERSION_CHECK_ENABLED"] = "true" if collector["version_check_enabled"] else "false"
+        if collector.get("version_check_base_url") is not None:
+            os.environ["CENTRAL_VERSION_CHECK_BASE_URL"] = str(collector["version_check_base_url"])
         device_type_tags = collector.get("device_type_tags")
         if isinstance(device_type_tags, dict):
             mapping = {
@@ -190,6 +199,99 @@ def env_bool(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def parse_version(value: str) -> tuple[int, ...]:
+    parts = re.findall(r"\d+", value)
+    return tuple(int(part) for part in parts) if parts else (0,)
+
+
+def compare_versions(current: str, latest: str) -> str:
+    current_parts = parse_version(current)
+    latest_parts = parse_version(latest)
+    size = max(len(current_parts), len(latest_parts))
+    current_parts = current_parts + (0,) * (size - len(current_parts))
+    latest_parts = latest_parts + (0,) * (size - len(latest_parts))
+    if current_parts < latest_parts:
+        return "outdated"
+    if current_parts > latest_parts:
+        return "newer"
+    return "current"
+
+
+def request_text(url: str, timeout: int = VERSION_CHECK_TIMEOUT_SECONDS) -> str:
+    req = Request(url, headers={"Accept": "text/plain"}, method="GET")
+    with urlopen(req, timeout=timeout) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def extract_python_constant(text: str, name: str) -> str | None:
+    match = re.search(rf'^{re.escape(name)}\s*=\s*["\']([^"\']+)["\']', text, flags=re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def extract_template_version(text: str) -> str | None:
+    match = re.search(r"^\s*value:\s*['\"]?([^'\"\s]+)['\"]?\s*#\s*TEMPLATE_VERSION\s*$", text, flags=re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def build_version_component(name: str, current: str, latest: str | None, error: str | None = None) -> dict[str, Any]:
+    status = "unknown" if error or not latest else compare_versions(current, latest)
+    return {
+        "name": name,
+        "current": current,
+        "latest": latest or "",
+        "status": status,
+        "up_to_date": status in ("current", "newer"),
+        "error": error or "",
+    }
+
+
+def collect_version_status() -> dict[str, Any]:
+    enabled = env_bool("CENTRAL_VERSION_CHECK_ENABLED", True)
+    result: dict[str, Any] = {
+        "enabled": enabled,
+        "collector": build_version_component("collector", COLLECTOR_VERSION, None, "version check disabled"),
+        "template": build_version_component("template", TEMPLATE_VERSION, None, "version check disabled"),
+        "status": "disabled",
+        "checked_at": int(time.time()),
+    }
+    if not enabled:
+        return result
+
+    base_url = env("CENTRAL_VERSION_CHECK_BASE_URL", required=False, default=GITHUB_RAW_BASE_URL).rstrip("/")
+    try:
+        collector_text = request_text(f"{base_url}/central_collector.py")
+        latest_collector = extract_python_constant(collector_text, "COLLECTOR_VERSION")
+        result["collector"] = build_version_component(
+            "collector",
+            COLLECTOR_VERSION,
+            latest_collector,
+            None if latest_collector else "COLLECTOR_VERSION not found in remote collector",
+        )
+    except Exception as exc:
+        result["collector"] = build_version_component("collector", COLLECTOR_VERSION, None, str(exc))
+
+    try:
+        template_text = request_text(f"{base_url}/zabbix_template_hpe_aruba_central_new_ap_trapper.yaml")
+        latest_template = extract_template_version(template_text)
+        result["template"] = build_version_component(
+            "template",
+            TEMPLATE_VERSION,
+            latest_template,
+            None if latest_template else "CENTRAL.TEMPLATE.VERSION not found in remote template",
+        )
+    except Exception as exc:
+        result["template"] = build_version_component("template", TEMPLATE_VERSION, None, str(exc))
+
+    components = (result["collector"], result["template"])
+    if any(component["status"] == "outdated" for component in components):
+        result["status"] = "outdated"
+    elif any(component["status"] == "unknown" for component in components):
+        result["status"] = "unknown"
+    else:
+        result["status"] = "current"
+    return result
 
 
 def request_json(
@@ -961,6 +1063,9 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
     health = {
         "status": "ok" if all(item.get("status") == "ok" for item in workspace_summaries) else "degraded",
         "timestamp": int(time.time()),
+        "collector_version": COLLECTOR_VERSION,
+        "template_version": TEMPLATE_VERSION,
+        "version_status": collect_version_status(),
         "workspace_count": workspace_count,
         "tenants_count": tenant_count,
         "devices_total": devices_total,

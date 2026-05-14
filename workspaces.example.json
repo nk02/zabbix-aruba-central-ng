@@ -8,6 +8,8 @@
   "collector": {
     "interval_seconds": 300,
     "collect_client_counts": false,
+    "version_check_enabled": true,
+    "version_check_base_url": "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng/main",
     "device_type_tags": {
       "ap": "ap",
       "switch": "switch",

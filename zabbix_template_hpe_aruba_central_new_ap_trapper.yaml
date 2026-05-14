@@ -16,6 +16,9 @@ zabbix_export:
         - macro: '{$CENTRAL.COLLECTOR.NODATA}'
           value: 15m
           description: 'Time without collector health updates before raising an alert.'
+        - macro: '{$CENTRAL.TEMPLATE.VERSION}'
+          value: 0.2.0 # TEMPLATE_VERSION
+          description: 'Version of this Zabbix template package.'
       items:
         - uuid: 73ddacbc76ef4db486d466d5a6acaa42
           name: 'Collector health'
@@ -130,6 +133,134 @@ zabbix_export:
           tags:
             - tag: component
               value: collector
+        - uuid: 2c2ef8db6d204464b0fb5640528fa52d
+          name: 'Collector package version status'
+          type: DEPENDENT
+          key: central.collector.version_status
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.version_status.status
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: update
+        - uuid: afeed5a8b56b44f4b3c38604fd617fac
+          name: 'Collector version'
+          type: DEPENDENT
+          key: central.collector.version
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.version_status.collector.current
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: update
+        - uuid: 8796d03b884b41dc9007ecfa1f932979
+          name: 'Latest collector version on GitHub'
+          type: DEPENDENT
+          key: central.collector.version_latest
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.version_status.collector.latest
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: update
+        - uuid: 962381e01af648e8936a03a6f958b38d
+          name: 'Collector update status'
+          type: DEPENDENT
+          key: central.collector.update_status
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.version_status.collector.status
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: update
+          triggers:
+            - uuid: a7782164e8f04f4283a916b15f67d64d
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.collector.update_status)="outdated"'
+              name: 'HPE Central collector: newer collector version available on GitHub'
+              priority: INFO
+              tags:
+                - tag: scope
+                  value: update
+        - uuid: c8f13b06d9114f3f810263be5afd3f34
+          name: 'Template package version'
+          type: DEPENDENT
+          key: central.template.version
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.version_status.template.current
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: update
+        - uuid: 41db693fa4734073a8e58727965c60bd
+          name: 'Latest template package version on GitHub'
+          type: DEPENDENT
+          key: central.template.version_latest
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.version_status.template.latest
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: update
+        - uuid: a9893b1ff2ee476fb1d24b0570210711
+          name: 'Template update status'
+          type: DEPENDENT
+          key: central.template.update_status
+          value_type: CHAR
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - $.version_status.template.status
+          master_item:
+            key: central.collector.health
+          tags:
+            - tag: component
+              value: collector
+            - tag: scope
+              value: update
+          triggers:
+            - uuid: db6bb4f76f724c6a8f8eea15b72488b1
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.template.update_status)="outdated"'
+              name: 'HPE Central collector: newer Zabbix template version available on GitHub'
+              priority: INFO
+              tags:
+                - tag: scope
+                  value: update
       discovery_rules:
         - uuid: c69fa6a70a39417aaec9d913a27c21ce
           name: 'HPE Central AP discovery'
