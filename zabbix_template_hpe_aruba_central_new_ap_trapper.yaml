@@ -20,7 +20,7 @@ zabbix_export:
           value: '30'
           description: 'Raise a warning when a subscription expires within this number of days.'
         - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-          value: 0.4.0 # TEMPLATE_VERSION
+          value: 0.4.1 # TEMPLATE_VERSION
           description: 'Version of this Zabbix template package.'
       items:
         - uuid: 73ddacbc76ef4db486d466d5a6acaa42
@@ -773,6 +773,28 @@ zabbix_export:
                   value: '{#DEVICE_TYPE_TAG}'
                 - tag: site
                   value: '{#SITE_NAME}'
+            - uuid: 73083dc19b404860b443d01b7534f5d6
+              name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: AP status'
+              type: DEPENDENT
+              key: 'central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              value_type: CHAR
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - $.ap_status
+              master_item:
+                key: 'central.ap.radio.raw[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}]'
+              tags:
+                - tag: component
+                  value: availability
+                - tag: tenant
+                  value: '{#TENANT_NAME}'
+                - tag: workspace
+                  value: '{#WORKSPACE_NAME}'
+                - tag: device_type
+                  value: '{#DEVICE_TYPE_TAG}'
+                - tag: site
+                  value: '{#SITE_NAME}'
             - uuid: c7856c3e9d2f4533b5645e345b66515d
               name: 'AP {#DEVICE_NAME} radio {#RADIO_BAND}: channel utilization'
               type: DEPENDENT
@@ -866,21 +888,21 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: b618db3c54ce413e8013fbd76d342123
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
               name: 'AP {#DEVICE_NAME}: radio {#RADIO_BAND} is not up'
               priority: AVERAGE
               tags:
                 - tag: scope
                   value: availability
             - uuid: a01bfe290a7748c8b7fe5144671e080d
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} channel utilization'
               priority: WARNING
               tags:
                 - tag: scope
                   value: performance
             - uuid: 15e70420bc114b59ae6f52f8893f86d2
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} noise floor'
               priority: WARNING
               tags:

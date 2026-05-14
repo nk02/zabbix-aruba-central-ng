@@ -16,8 +16,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "0.4.0"
-TEMPLATE_VERSION = "0.4.0"
+COLLECTOR_VERSION = "0.4.1"
+TEMPLATE_VERSION = "0.4.1"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -1054,6 +1054,7 @@ def build_ap_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_
             radio_record["tenant_name"] = ap.get("tenant_name")
             radio_record["workspace_name"] = ap.get("workspace_name")
             radio_record["workspace_id"] = ap.get("workspace_id")
+            radio_record["ap_status"] = ap.get("status")
             radio_record["ap_serial"] = serial
             radio_record["ap_name"] = ap.get("name")
             radio_record["ap_site_id"] = site_id
