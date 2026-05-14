@@ -16,9 +16,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "0.5.2"
-TEMPLATE_VERSION = "0.5.2"
-CONFIG_SCHEMA_VERSION = "0.5.1"
+COLLECTOR_VERSION = "1.0.0-dev"
+TEMPLATE_VERSION = "1.0.0-dev"
+CONFIG_SCHEMA_VERSION = "1.0.0-dev"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -46,13 +46,12 @@ RECOMMENDED_CONFIG_PATHS = (
     "config_version",
     "collector.interval_seconds",
     "collector.collect_client_counts",
-    "collector.alert_mode",
     "collector.version_check_enabled",
     "collector.version_check_base_url",
     "collector.version_check_ref",
-    "collector.device_type_tags.ap",
-    "collector.device_type_tags.switch",
-    "collector.device_type_tags.gateway",
+    "zabbix.host_tags.ap",
+    "zabbix.host_tags.switch",
+    "zabbix.host_tags.gateway",
 )
 
 
@@ -102,7 +101,11 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
     mapping = {
         "server": "ZABBIX_SERVER",
         "port": "ZABBIX_PORT",
-        "host": "ZABBIX_HOST",
+        "collector_host": "ZABBIX_COLLECTOR_HOST",
+        "api_url": "ZABBIX_API_URL",
+        "api_token": "ZABBIX_API_TOKEN",
+        "unmapped_host_group": "ZABBIX_UNMAPPED_HOST_GROUP",
+        "host_name_prefix": "ZABBIX_HOST_NAME_PREFIX",
         "sender_path": "ZABBIX_SENDER_PATH",
     }
     for source, target in mapping.items():
@@ -114,24 +117,14 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["COLLECTOR_INTERVAL_SECONDS"] = str(collector["interval_seconds"])
         if collector.get("collect_client_counts") is not None:
             os.environ["HPE_COLLECT_CLIENT_COUNTS"] = "true" if collector["collect_client_counts"] else "false"
+        if collector.get("lld_settle_seconds") is not None:
+            os.environ["CENTRAL_LLD_SETTLE_SECONDS"] = str(collector["lld_settle_seconds"])
         if collector.get("version_check_enabled") is not None:
             os.environ["CENTRAL_VERSION_CHECK_ENABLED"] = "true" if collector["version_check_enabled"] else "false"
         if collector.get("version_check_base_url") is not None:
             os.environ["CENTRAL_VERSION_CHECK_BASE_URL"] = str(collector["version_check_base_url"])
         if collector.get("version_check_ref") is not None:
             os.environ["CENTRAL_VERSION_CHECK_REF"] = str(collector["version_check_ref"])
-        if collector.get("alert_mode") is not None:
-            os.environ["CENTRAL_ALERT_MODE"] = str(collector["alert_mode"])
-        device_type_tags = collector.get("device_type_tags")
-        if isinstance(device_type_tags, dict):
-            mapping = {
-                "ap": "CENTRAL_TAG_AP",
-                "switch": "CENTRAL_TAG_SWITCH",
-                "gateway": "CENTRAL_TAG_GATEWAY",
-            }
-            for source, target in mapping.items():
-                if device_type_tags.get(source) is not None:
-                    os.environ[target] = str(device_type_tags[source])
 
 
 def config_workspaces(config: dict[str, Any] | None) -> list[dict[str, Any]]:
@@ -298,6 +291,9 @@ def extract_python_constant(text: str, name: str) -> str | None:
 
 def extract_template_version(text: str) -> str | None:
     match = re.search(r"^\s*value:\s*['\"]?([^'\"\s]+)['\"]?\s*#\s*TEMPLATE_VERSION\s*$", text, flags=re.MULTILINE)
+    if match:
+        return match.group(1)
+    match = re.search(r"^\s*value:\s*['\"]([^'\"\s]+)\s+#\s*TEMPLATE_VERSION['\"]\s*$", text, flags=re.MULTILINE)
     return match.group(1) if match else None
 
 
@@ -389,6 +385,75 @@ def request_json(
         raise CentralError(f"HTTP {exc.code} calling {url}: {body}") from exc
     except URLError as exc:
         raise CentralError(f"Network error calling {url}: {exc.reason}") from exc
+
+
+def zabbix_api_call(method: str, params: dict[str, Any] | list[Any] | None = None) -> Any:
+    api_url = env("ZABBIX_API_URL")
+    api_token = env("ZABBIX_API_TOKEN")
+    payload = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params or {},
+        "id": 1,
+    }
+    data = json.dumps(payload, ensure_ascii=True).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json-rpc",
+        "Authorization": f"Bearer {api_token}",
+    }
+    req = Request(api_url, data=data, headers=headers, method="POST")
+    try:
+        with urlopen(req, timeout=60) as response:
+            body = response.read().decode("utf-8")
+            result = json.loads(body) if body else {}
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise CentralError(f"HTTP {exc.code} calling Zabbix API {method}: {body}") from exc
+    except URLError as exc:
+        raise CentralError(f"Network error calling Zabbix API {method}: {exc.reason}") from exc
+    if isinstance(result, dict) and result.get("error"):
+        raise CentralError(f"Zabbix API {method} failed: {result['error']}")
+    return result.get("result") if isinstance(result, dict) else result
+
+
+def zabbix_managed_tag_config(config: dict[str, Any]) -> dict[str, str]:
+    zabbix = config.get("zabbix") if isinstance(config.get("zabbix"), dict) else {}
+    tag = zabbix.get("managed_tag") if isinstance(zabbix.get("managed_tag"), dict) else {}
+    return {
+        "tag": str(tag.get("tag") or "hpe-aruba-central-ng"),
+        "value": str(tag.get("value") or ""),
+    }
+
+
+def zabbix_has_tag(tags: Any, wanted: dict[str, str]) -> bool:
+    if not isinstance(tags, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and str(item.get("tag") or "") == wanted["tag"]
+        and str(item.get("value") or "") == wanted["value"]
+        for item in tags
+    )
+
+
+def zabbix_legacy_managed_tags() -> list[dict[str, str]]:
+    return [{"tag": "ManagedBy", "value": "hpe-aruba-central-ng"}]
+
+
+def zabbix_has_managed_tag(tags: Any, wanted: dict[str, str]) -> bool:
+    return zabbix_has_tag(tags, wanted) or any(zabbix_has_tag(tags, legacy) for legacy in zabbix_legacy_managed_tags())
+
+
+def zabbix_merge_tags(*tag_lists: list[dict[str, str]]) -> list[dict[str, str]]:
+    merged: dict[tuple[str, str], dict[str, str]] = {}
+    for tags in tag_lists:
+        for item in tags or []:
+            tag = str(item.get("tag") or "")
+            value = str(item.get("value") or "")
+            if tag:
+                merged[(tag, value)] = {"tag": tag, "value": value}
+    return list(merged.values())
 
 
 def request_status(method: str, url: str, token: str, query: dict[str, str | int] | None = None) -> dict[str, Any]:
@@ -573,26 +638,6 @@ def get_all_pages(token: str, path: str, query: dict[str, str | int] | None = No
     return all_items
 
 
-def get_all_alert_pages(token: str, query: dict[str, str | int] | None = None) -> list[dict[str, Any]]:
-    params: dict[str, str | int] = {"limit": 100}
-    if query:
-        params.update(query)
-
-    all_items: list[dict[str, Any]] = []
-    next_cursor: Any = params.pop("next", None)
-    while True:
-        page_params = dict(params)
-        if next_cursor:
-            page_params["next"] = next_cursor
-        data = central_get(token, "/network-notifications/v1/alerts", page_params)
-        items = extract_items(data)
-        all_items.extend(items)
-        next_cursor = data.get("next")
-        if not next_cursor or not items:
-            break
-    return all_items
-
-
 def get_greenlake_all_pages(token: str, path: str, query: dict[str, str | int] | None = None) -> list[dict[str, Any]]:
     params: dict[str, str | int] = {"limit": 100, "offset": 0}
     if query:
@@ -635,6 +680,70 @@ def as_list(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
 
 def tenant_name(tenant: dict[str, Any]) -> str:
     return str(tenant.get("workspaceName") or tenant.get("name") or tenant.get("id") or "")
+
+
+def safe_host_part(value: Any, fallback: str = "Unknown") -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    return text or fallback
+
+
+def mapping_matches(value: str, mapping: dict[str, Any], id_key: str, name_key: str) -> bool:
+    wanted_id = str(mapping.get(id_key) or "").strip().lower()
+    wanted_name = str(mapping.get(name_key) or "").strip().lower()
+    return value.lower() in {wanted_id, wanted_name}
+
+
+def workspace_mapping(workspace: dict[str, Any]) -> dict[str, Any]:
+    mapping = workspace.get("mapping")
+    return mapping if isinstance(mapping, dict) else {}
+
+
+def tenant_mapping(workspace: dict[str, Any], tenant: dict[str, Any]) -> dict[str, Any]:
+    mappings = workspace.get("tenant_mappings")
+    if not isinstance(mappings, list):
+        return workspace_mapping(workspace) if workspace.get("mode") == "standalone" else {}
+    tenant_id = str(tenant.get("id") or "")
+    name = tenant_name(tenant)
+    for mapping in mappings:
+        if not isinstance(mapping, dict):
+            continue
+        if mapping_matches(tenant_id, mapping, "tenant_id", "tenant_name") or mapping_matches(name, mapping, "tenant_id", "tenant_name"):
+            return mapping
+    return workspace_mapping(workspace) if workspace.get("mode") == "standalone" else {}
+
+
+def unmapped_host_group() -> str:
+    return env("ZABBIX_UNMAPPED_HOST_GROUP", required=False, default="HPE Aruba Central/Unmapped")
+
+
+def collector_host_name() -> str:
+    return env("ZABBIX_COLLECTOR_HOST", required=False, default="HPE Aruba Central Collector")
+
+
+def host_prefix(mapping: dict[str, Any]) -> str:
+    if mapping.get("host_prefix"):
+        return safe_host_part(mapping.get("host_prefix"))
+    if mapping.get("customer_prefix"):
+        return safe_host_part(mapping.get("customer_prefix"))
+    return "UNMAPPED"
+
+
+def site_host_name(prefix: str, site_name: Any) -> str:
+    return f"{prefix} - {safe_host_part(site_name, 'No Site')} - Central Site"
+
+
+def device_host_name(prefix: str, device: dict[str, Any]) -> str:
+    return f"{prefix} - {safe_host_part(device.get('name') or device.get('serial'), 'Central Device')}"
+
+
+def apply_global_host_prefix(name: str) -> str:
+    prefix = env("ZABBIX_HOST_NAME_PREFIX", required=False, default="").strip()
+    if not prefix:
+        return name
+    separator = "" if prefix[-1].isspace() else " "
+    full_prefix = f"{prefix}{separator}"
+    return name if name.startswith(full_prefix) else f"{full_prefix}{name}"
 
 
 def get_switches_for_tenant(msp_token: str, tenant: dict[str, Any]) -> list[dict[str, Any]]:
@@ -782,27 +891,6 @@ def get_switch_hardware_trends(token: str, serial: str, site_id: str | None = No
     query = {"site-id": site_id} if site_id else None
     data = get_optional_switch_dict(token, f"/network-monitoring/v1/switches/{serial}/hardware-trends", query)
     return data if data else {}
-
-
-def get_active_alerts_for_tenant(msp_token: str, tenant: dict[str, Any]) -> list[dict[str, Any]]:
-    tenant_id = str(tenant.get("id") or "")
-    if not tenant_id:
-        return []
-    token = tenant_token(msp_token, tenant)
-    try:
-        alerts = get_all_alert_pages(token, {"filter": "status eq 'Active'"})
-    except CentralError as exc:
-        if "HTTP 401" not in str(exc):
-            raise
-        clear_cached_token(f"tenant:{tenant_id}")
-        token = tenant_token(msp_token, tenant, force_refresh=True)
-        alerts = get_all_alert_pages(token, {"filter": "status eq 'Active'"})
-    for alert in alerts:
-        alert["_tenant_id"] = tenant_id
-        alert["_tenant_name"] = tenant_name(tenant)
-        alert["_workspace_id"] = tenant.get("_workspace_id")
-        alert["_workspace_name"] = tenant.get("_workspace_name")
-    return alerts
 
 
 def get_connected_clients_count(token: str, serial: str, site_id: str | None = None) -> int | None:
@@ -1120,31 +1208,6 @@ def nested_first(data: dict[str, Any], path: tuple[str, ...]) -> Any:
     return value
 
 
-def normalize_alert(alert: dict[str, Any]) -> dict[str, Any]:
-    alert_id = str(first_value(alert, "id", "key") or "")
-    return {
-        "workspace_id": alert.get("_workspace_id"),
-        "workspace_name": alert.get("_workspace_name"),
-        "tenant_id": alert.get("_tenant_id"),
-        "tenant_name": alert.get("_tenant_name"),
-        "id": alert_id,
-        "name": first_value(alert, "name", "summary", "typeId"),
-        "summary": first_value(alert, "summary", "description", "name"),
-        "severity": alert.get("severity"),
-        "priority": alert.get("priority"),
-        "status": alert.get("status"),
-        "category": alert.get("category"),
-        "device_type": alert.get("deviceType"),
-        "site_id": alert.get("siteId"),
-        "site_name": alert.get("siteName"),
-        "device_id": first_value(alert, "deviceId", "device_id", "serial", "deviceSerial"),
-        "created_at": alert.get("createdAt"),
-        "updated_at": alert.get("updatedAt"),
-        "type_id": first_value(alert, "typeId", "type_id", "key"),
-        "raw": alert,
-    }
-
-
 def parse_iso_datetime(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
@@ -1317,6 +1380,127 @@ def parse_sender_line(line: str) -> tuple[str, str, str]:
     )
 
 
+def sender_key_args(key: str) -> list[str]:
+    match = re.search(r"\[(.*)\]$", key)
+    if not match:
+        return []
+    return [item.strip() for item in match.group(1).split(",")]
+
+
+def lld_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"data": rows}
+
+
+def retarget_sender_lines(lines: list[str], host_by_serial: dict[str, str], collector_host: str) -> list[str]:
+    retargeted: list[str] = []
+    ap_radios: dict[str, list[dict[str, Any]]] = {}
+    switch_interfaces: dict[str, list[dict[str, Any]]] = {}
+    switch_lags: dict[str, list[dict[str, Any]]] = {}
+    switch_stack_members: dict[str, list[dict[str, Any]]] = {}
+    switch_hardware: dict[str, list[dict[str, Any]]] = {}
+
+    for line in lines:
+        _host, key, value = parse_sender_line(line)
+        target_host = collector_host
+        args = sender_key_args(key)
+        if key in {
+            "central.aps.discovery",
+            "central.ap.radios.discovery",
+            "central.switches.discovery",
+            "central.switch.interfaces.discovery",
+            "central.switch.lags.discovery",
+            "central.switch.stack_members.discovery",
+            "central.switch.hardware.discovery",
+            "central.switch.vsx.discovery",
+            "central.switch.hardware_trends.discovery",
+        }:
+            continue
+        if key.startswith("central.ap.raw[") and len(args) >= 2:
+            target_host = host_by_serial.get(args[1], collector_host)
+            key = "central.ap.raw"
+        elif key.startswith("central.ap.radio.raw[") and len(args) >= 2:
+            target_host = host_by_serial.get(args[1], collector_host)
+            radio_number = args[2] if len(args) > 2 else ""
+            key = f"central.ap.radio.raw[{radio_number}]"
+            record = json.loads(value)
+            ap_radios.setdefault(target_host, []).append(
+                {
+                    "{#RADIO_NUMBER}": record.get("radio_number"),
+                    "{#RADIO_BAND}": record.get("band"),
+                }
+            )
+        elif key.startswith("central.switch.") and ".raw[" in key and len(args) >= 2:
+            target_host = host_by_serial.get(args[1], collector_host)
+            record = json.loads(value)
+            if key.startswith("central.switch.raw["):
+                key = "central.switch.raw"
+            elif key.startswith("central.switch.interface.raw["):
+                port_index = args[2] if len(args) > 2 else ""
+                key = f"central.switch.interface.raw[{port_index}]"
+                switch_interfaces.setdefault(target_host, []).append(
+                    {
+                        "{#PORT_INDEX}": record.get("port_index"),
+                        "{#PORT_NAME}": record.get("name"),
+                        "{#PORT_CONNECTOR}": record.get("connector"),
+                    }
+                )
+            elif key.startswith("central.switch.lag.raw["):
+                lag_id = args[2] if len(args) > 2 else ""
+                key = f"central.switch.lag.raw[{lag_id}]"
+                switch_lags.setdefault(target_host, []).append(
+                    {
+                        "{#LAG_ID}": record.get("lag_id"),
+                        "{#LAG_NAME}": record.get("name") or record.get("lag_id"),
+                    }
+                )
+            elif key.startswith("central.switch.stack_member.raw["):
+                member_id = args[2] if len(args) > 2 else ""
+                key = f"central.switch.stack_member.raw[{member_id}]"
+                switch_stack_members.setdefault(target_host, []).append(
+                    {
+                        "{#STACK_MEMBER_ID}": record.get("member_id"),
+                        "{#STACK_MEMBER_NAME}": record.get("name") or record.get("serial") or record.get("member_id"),
+                    }
+                )
+            elif key.startswith("central.switch.hardware.raw["):
+                hardware_id = args[2] if len(args) > 2 else ""
+                key = f"central.switch.hardware.raw[{hardware_id}]"
+                switch_hardware.setdefault(target_host, []).append(
+                    {
+                        "{#HARDWARE_ID}": record.get("hardware_id"),
+                        "{#HARDWARE_NAME}": record.get("name") or record.get("hardware_id"),
+                        "{#HARDWARE_TYPE}": record.get("type"),
+                    }
+                )
+            elif key.startswith("central.switch.vsx.raw["):
+                key = "central.switch.vsx.raw"
+            elif key.startswith("central.switch.hardware_trends.raw["):
+                key = "central.switch.hardware_trends.raw"
+        retargeted.append(sender_line(target_host, key, value))
+
+    for host, rows in ap_radios.items():
+        retargeted.append(sender_line(host, "central.ap.radios.discovery", lld_payload(rows)))
+    for host, rows in switch_interfaces.items():
+        retargeted.append(sender_line(host, "central.switch.interfaces.discovery", lld_payload(rows)))
+    for host, rows in switch_lags.items():
+        retargeted.append(sender_line(host, "central.switch.lags.discovery", lld_payload(rows)))
+    for host, rows in switch_stack_members.items():
+        retargeted.append(sender_line(host, "central.switch.stack_members.discovery", lld_payload(rows)))
+    for host, rows in switch_hardware.items():
+        retargeted.append(sender_line(host, "central.switch.hardware.discovery", lld_payload(rows)))
+    return retargeted
+
+
+def host_lookup_from_plans(plans: list[dict[str, Any]]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for plan in plans:
+        serial = plan.get("serial")
+        host = plan.get("host")
+        if serial and host and plan.get("kind") in ("ap", "switch", "gateway"):
+            lookup[str(serial)] = str(host)
+    return lookup
+
+
 def build_ap_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
     started = time.time()
     aps: list[dict[str, Any]] = []
@@ -1487,51 +1671,6 @@ def build_license_sender_lines(
     return lines
 
 
-def alert_mode() -> str:
-    mode = env("CENTRAL_ALERT_MODE", required=False, default="central").strip().lower()
-    if mode not in ("central", "items", "both", "none"):
-        raise ConfigError("collector.alert_mode must be one of: central, items, both, none")
-    return mode
-
-
-def build_alert_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
-    mode = alert_mode()
-    if mode not in ("central", "both"):
-        summary = {
-            "mode": mode,
-            "active_count": 0,
-            "severity_counts": {},
-            "alerts": [],
-        }
-        return [sender_line(zabbix_host, "central.alerts.summary", summary), sender_line(zabbix_host, "central.alerts.discovery", {"data": []})]
-
-    alerts: list[dict[str, Any]] = []
-    lines: list[str] = []
-    for tenant in tenants:
-        alerts.extend(normalize_alert(alert) for alert in get_active_alerts_for_tenant(msp_token, tenant))
-
-    severity_counts: dict[str, int] = {}
-    for alert in alerts:
-        severity = str(alert.get("severity") or "Unknown")
-        severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-    summary = {
-        "mode": mode,
-        "active_count": len(alerts),
-        "severity_counts": severity_counts,
-        "alerts": alerts,
-    }
-    lines.append(sender_line(zabbix_host, "central.alerts.summary", summary))
-    lines.append(sender_line(zabbix_host, "central.alerts.discovery", alerts_lld(alerts)))
-    for alert in alerts:
-        tenant_id = str(alert.get("tenant_id") or "")
-        alert_id = str(alert.get("id") or "")
-        if not tenant_id or not alert_id:
-            continue
-        lines.append(sender_line(zabbix_host, f"central.alert.raw[{tenant_id},{alert_id}]", alert))
-    return lines
-
-
 def build_all_sender_lines(
     msp_token: str,
     tenants: list[dict[str, Any]],
@@ -1542,7 +1681,6 @@ def build_all_sender_lines(
     ap_lines = build_ap_sender_lines(msp_token, tenants, zabbix_host)
     switch_lines = build_switch_sender_lines(msp_token, tenants, zabbix_host)
     license_lines = build_license_sender_lines(msp_token, workspace or {}, tenants, zabbix_host)
-    alert_lines = build_alert_sender_lines(msp_token, tenants, zabbix_host)
     inventory = collect_device_inventory_summary(msp_token, tenants)
     health = {
         "status": "ok",
@@ -1551,24 +1689,29 @@ def build_all_sender_lines(
         "device_counts_by_type": inventory["device_counts_by_type"],
         "device_counts_by_tenant": inventory["device_counts_by_tenant"],
         "devices_total": inventory["devices_total"],
-        "alert_mode": alert_mode(),
-        "sent_lines": len(ap_lines) + len(switch_lines) + len(license_lines) + len(alert_lines),
+        "sent_lines": len(ap_lines) + len(switch_lines) + len(license_lines),
         "elapsed_seconds": round(time.time() - started, 3),
     }
     return [sender_line(zabbix_host, "central.collector.health", health)] + [
-        line for line in ap_lines + switch_lines + license_lines + alert_lines if " central.collector.health " not in line
+        line for line in ap_lines + switch_lines + license_lines if " central.collector.health " not in line
     ]
 
 
 def build_all_config_sender_lines(config: dict[str, Any] | None) -> list[str]:
     health, all_lines = collect_all_config_payload(config)
-    zabbix_host = env("ZABBIX_HOST", required=False, default="HPE Aruba Central")
-    return [sender_line(zabbix_host, "central.collector.health", health)] + all_lines
+    collector_host = apply_global_host_prefix(collector_host_name())
+    lines = [sender_line(collector_host, "central.collector.health", health)] + all_lines
+    try:
+        plans = collect_host_plans(config or {})
+        return retarget_sender_lines(lines, host_lookup_from_plans(plans), collector_host)
+    except Exception as exc:
+        health["host_retargeting_status"] = {"status": "error", "error": str(exc)}
+        return [sender_line(collector_host, "central.collector.health", health)] + all_lines
 
 
 def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str, Any], list[str]]:
     apply_zabbix_config(config)
-    zabbix_host = env("ZABBIX_HOST", required=False, default="HPE Aruba Central")
+    zabbix_host = apply_global_host_prefix(collector_host_name())
     started = time.time()
     all_lines: list[str] = []
     discovery_data: dict[str, list[dict[str, Any]]] = {
@@ -1582,10 +1725,8 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
         "central.switch.vsx.discovery": [],
         "central.switch.hardware_trends.discovery": [],
         "central.licenses.discovery": [],
-        "central.alerts.discovery": [],
     }
     workspace_summaries: list[dict[str, Any]] = []
-    active_alerts: list[dict[str, Any]] = []
     workspace_count = 0
     tenant_count = 0
     devices_total = 0
@@ -1609,11 +1750,6 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
             for line in workspace_lines:
                 _host, key, value = parse_sender_line(line)
                 if key == "central.collector.health":
-                    continue
-                if key == "central.alerts.summary":
-                    payload = json.loads(value)
-                    if isinstance(payload, dict) and isinstance(payload.get("alerts"), list):
-                        active_alerts.extend(item for item in payload["alerts"] if isinstance(item, dict))
                     continue
                 if key in discovery_data:
                     payload = json.loads(value)
@@ -1648,22 +1784,11 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
             )
         workspace_summaries.append(summary)
 
-    alert_severity_counts: dict[str, int] = {}
-    for alert in active_alerts:
-        severity = str(alert.get("severity") or "Unknown")
-        alert_severity_counts[severity] = alert_severity_counts.get(severity, 0) + 1
-    alert_summary = {
-        "mode": alert_mode(),
-        "active_count": len(active_alerts),
-        "severity_counts": alert_severity_counts,
-        "alerts": active_alerts,
-    }
-
     discovery_lines = [
         sender_line(zabbix_host, key, {"data": data})
         for key, data in discovery_data.items()
     ]
-    all_lines = [sender_line(zabbix_host, "central.alerts.summary", alert_summary)] + discovery_lines + all_lines
+    all_lines = discovery_lines + all_lines
 
     health = {
         "status": "ok" if all(item.get("status") == "ok" for item in workspace_summaries) else "degraded",
@@ -1672,9 +1797,6 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
         "template_version": TEMPLATE_VERSION,
         "version_status": collect_version_status(),
         "config_status": collect_config_status(config),
-        "alert_mode": alert_mode(),
-        "active_alerts_count": len(active_alerts),
-        "active_alerts_by_severity": alert_severity_counts,
         "workspace_count": workspace_count,
         "tenants_count": tenant_count,
         "devices_total": devices_total,
@@ -1756,6 +1878,321 @@ def run_zabbix_sender(lines: list[str]) -> dict[str, Any]:
             pass
 
 
+def is_discovery_sender_line(line: str) -> bool:
+    try:
+        _host, key, _value = parse_sender_line(line)
+    except ValueError:
+        return False
+    return key.endswith(".discovery")
+
+
+def run_zabbix_sender_discovery_first(lines: list[str]) -> dict[str, Any]:
+    discovery_lines = [line for line in lines if is_discovery_sender_line(line)]
+    value_lines = [line for line in lines if not is_discovery_sender_line(line)]
+    if not discovery_lines or not value_lines:
+        return run_zabbix_sender(lines)
+
+    settle_seconds = max(0, int(env("CENTRAL_LLD_SETTLE_SECONDS", required=False, default="10")))
+    discovery_result = run_zabbix_sender(discovery_lines)
+    if settle_seconds:
+        time.sleep(settle_seconds)
+    values_result = run_zabbix_sender(value_lines)
+    return {
+        "mode": "discovery_first",
+        "settle_seconds": settle_seconds,
+        "returncode": values_result.get("returncode", 0) or discovery_result.get("returncode", 0),
+        "sent_lines": len(lines),
+        "discovery": discovery_result,
+        "values": values_result,
+    }
+
+
+def zabbix_sender_stdout(result: dict[str, Any]) -> str:
+    if result.get("mode") != "discovery_first":
+        return str(result.get("stdout") or "")
+    discovery = result.get("discovery") if isinstance(result.get("discovery"), dict) else {}
+    values = result.get("values") if isinstance(result.get("values"), dict) else {}
+    return f"discovery={discovery.get('stdout')!r} values={values.get('stdout')!r}"
+
+
+def zabbix_sender_stderr(result: dict[str, Any]) -> str:
+    if result.get("mode") != "discovery_first":
+        return str(result.get("stderr") or "")
+    discovery = result.get("discovery") if isinstance(result.get("discovery"), dict) else {}
+    values = result.get("values") if isinstance(result.get("values"), dict) else {}
+    return f"discovery={discovery.get('stderr')!r} values={values.get('stderr')!r}"
+
+
+def zabbix_get_or_create_hostgroup(name: str, apply: bool = False) -> dict[str, Any]:
+    groups = zabbix_api_call("hostgroup.get", {"output": ["groupid", "name"], "filter": {"name": [name]}})
+    if isinstance(groups, list) and groups:
+        return {"name": name, "groupid": groups[0]["groupid"], "created": False}
+    if not apply:
+        return {"name": name, "groupid": "", "created": False, "pending": True}
+    created = zabbix_api_call("hostgroup.create", {"name": name})
+    groupids = created.get("groupids") if isinstance(created, dict) else None
+    return {"name": name, "groupid": groupids[0] if groupids else "", "created": True}
+
+
+def zabbix_get_template_ids(template_names: list[str]) -> list[dict[str, str]]:
+    names = [name for name in template_names if name]
+    if not names:
+        return []
+    templates = zabbix_api_call("template.get", {"output": ["templateid", "host"], "filter": {"host": names}})
+    if not isinstance(templates, list):
+        return []
+    by_name = {template.get("host"): template.get("templateid") for template in templates if template.get("host")}
+    missing = [name for name in names if name not in by_name]
+    if missing:
+        raise CentralError(f"Missing Zabbix templates: {', '.join(missing)}")
+    return [{"templateid": str(by_name[name])} for name in names]
+
+
+def zabbix_get_host(host: str) -> dict[str, Any] | None:
+    hosts = zabbix_api_call(
+        "host.get",
+        {
+            "output": ["hostid", "host", "name"],
+            "selectTags": "extend",
+            "filter": {"host": [host]},
+        },
+    )
+    if isinstance(hosts, list) and hosts:
+        return hosts[0]
+    return None
+
+
+def zabbix_ensure_host(plan: dict[str, Any], apply: bool = False) -> dict[str, Any]:
+    config = plan.get("_config") if isinstance(plan.get("_config"), dict) else {}
+    managed_tag = zabbix_managed_tag_config(config)
+    desired_tags = zabbix_merge_tags(plan.get("tags") or [], [managed_tag])
+    group = zabbix_get_or_create_hostgroup(str(plan["host_group"]), apply=apply)
+    existing = zabbix_get_host(str(plan["host"]))
+    result = {
+        "host": plan["host"],
+        "visible_name": plan.get("visible_name") or plan["host"],
+        "host_group": plan["host_group"],
+        "templates": plan.get("templates") or [],
+        "tags": desired_tags,
+        "kind": plan.get("kind"),
+        "exists": bool(existing),
+        "created": False,
+        "updated": False,
+        "protected": False,
+        "pending": not apply,
+    }
+    if not apply:
+        return result
+    templates = zabbix_get_template_ids([str(item) for item in plan.get("templates") or []])
+    groups = [{"groupid": group["groupid"]}]
+    if existing:
+        if not zabbix_has_managed_tag(existing.get("tags"), managed_tag):
+            result["protected"] = True
+            result["pending"] = False
+            result["error"] = (
+                f"Existing host {plan['host']!r} is not tagged "
+                f"{managed_tag['tag']}={managed_tag['value']!r}; refusing to update it"
+            )
+            raise CentralError(result["error"])
+        params: dict[str, Any] = {
+            "hostid": existing["hostid"],
+            "name": plan.get("visible_name") or plan["host"],
+        }
+        params["tags"] = desired_tags
+        if templates:
+            params["templates"] = templates
+        zabbix_api_call("host.update", params)
+        result["updated"] = True
+        result["pending"] = False
+        return result
+    params = {
+        "host": plan["host"],
+        "name": plan.get("visible_name") or plan["host"],
+        "groups": groups,
+        "tags": desired_tags,
+    }
+    if templates:
+        params["templates"] = templates
+    created = zabbix_api_call("host.create", params)
+    result["created"] = bool(isinstance(created, dict) and created.get("hostids"))
+    result["pending"] = False
+    return result
+
+
+def zabbix_templates(config: dict[str, Any]) -> dict[str, str]:
+    zabbix = config.get("zabbix") if isinstance(config.get("zabbix"), dict) else {}
+    templates = zabbix.get("templates") if isinstance(zabbix.get("templates"), dict) else {}
+    return {
+        "collector": str(templates.get("collector") or "HPE Aruba Central Collector"),
+        "site": str(templates.get("site") or "HPE Aruba Central Site"),
+        "ap": str(templates.get("ap") or "HPE Aruba Central AP"),
+        "switch": str(templates.get("switch") or "HPE Aruba Central Switch"),
+        "gateway": str(templates.get("gateway") or "HPE Aruba Central Gateway"),
+    }
+
+
+def zabbix_host_tags_config(config: dict[str, Any]) -> dict[str, str]:
+    zabbix = config.get("zabbix") if isinstance(config.get("zabbix"), dict) else {}
+    tags = zabbix.get("host_tags") if isinstance(zabbix.get("host_tags"), dict) else {}
+    return {
+        "ap": str(tags.get("ap") or "WiFi"),
+        "switch": str(tags.get("switch") or "Switch"),
+        "gateway": str(tags.get("gateway") or "Gateway"),
+    }
+
+
+def zabbix_host_tags(config: dict[str, Any], kind: str) -> list[dict[str, str]]:
+    if kind not in ("ap", "switch", "gateway"):
+        return []
+    tags = zabbix_host_tags_config(config)
+    tag = tags.get(kind)
+    if not tag:
+        return []
+    return [{"tag": tag, "value": ""}]
+
+
+def collect_host_plans(config: dict[str, Any]) -> list[dict[str, Any]]:
+    apply_zabbix_config(config)
+    templates = zabbix_templates(config)
+    plans: dict[str, dict[str, Any]] = {}
+    collector_host = apply_global_host_prefix(collector_host_name())
+    plans[collector_host] = {
+        "_config": config,
+        "kind": "collector",
+        "host": collector_host,
+        "visible_name": collector_host,
+        "host_group": unmapped_host_group(),
+        "templates": [templates["collector"]],
+        "tags": zabbix_host_tags(config, "collector"),
+    }
+
+    for workspace in config_workspaces(config):
+        use_workspace_env(workspace)
+        msp_token = get_msp_token()
+        tenants = get_workspace_tenants(msp_token, workspace)
+        for tenant in tenants:
+            mapping = tenant_mapping(workspace, tenant)
+            tenant_devices = get_devices_for_tenant(msp_token, tenant)
+            tenant_switches = [normalize_switch(switch) for switch in get_switches_for_tenant(msp_token, tenant)]
+            devices = [normalize_device(device) for device in tenant_devices] + tenant_switches
+            for device in devices:
+                prefix = host_prefix(mapping)
+                host_group = unmapped_host_group()
+                site_key = apply_global_host_prefix(site_host_name(prefix, device.get("site_name")))
+                plans.setdefault(
+                    site_key,
+                    {
+                        "_config": config,
+                        "kind": "site",
+                        "host": site_key,
+                        "visible_name": site_key,
+                        "host_group": host_group,
+                        "templates": [templates["site"]],
+                        "tags": zabbix_host_tags(config, "site"),
+                        "workspace": workspace.get("name"),
+                        "tenant": tenant_name(tenant),
+                        "site_name": device.get("site_name"),
+                    },
+                )
+                device_type = str(device.get("device_type") or "SWITCH").upper()
+                template_key = "ap" if device_type == "ACCESS_POINT" else "switch" if device_type == "SWITCH" else "gateway" if device_type == "GATEWAY" else ""
+                if not template_key:
+                    continue
+                host = apply_global_host_prefix(device_host_name(prefix, device))
+                plans[host] = {
+                    "_config": config,
+                    "kind": template_key,
+                    "host": host,
+                    "visible_name": host,
+                    "host_group": host_group,
+                    "templates": [templates[template_key]],
+                    "tags": zabbix_host_tags(config, template_key),
+                    "workspace": workspace.get("name"),
+                    "tenant": tenant_name(tenant),
+                    "site_name": device.get("site_name"),
+                    "serial": device.get("serial"),
+                    "central_name": device.get("name"),
+                }
+    return sorted(plans.values(), key=lambda item: (str(item.get("host_group")), str(item.get("host"))))
+
+
+def sync_zabbix_hosts(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
+    plans = collect_host_plans(config)
+    if not apply:
+        return {
+            "apply": False,
+            "planned": len(plans),
+            "created": 0,
+            "updated": 0,
+            "hosts": [public_host_plan(plan, config) for plan in plans],
+        }
+    results = [zabbix_ensure_host(plan, apply=apply) for plan in plans]
+    return {
+        "apply": apply,
+        "planned": len(plans),
+        "created": sum(1 for item in results if item.get("created")),
+        "updated": sum(1 for item in results if item.get("updated")),
+        "hosts": results,
+    }
+
+
+def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
+    apply_zabbix_config(config)
+    path = Path(__file__).with_name("zabbix_template_hpe_aruba_central_new_ap_trapper.yaml")
+    source = path.read_text(encoding="utf-8")
+    template_names = extract_template_names(source)
+    result = {
+        "apply": apply,
+        "path": str(path),
+        "templates": template_names,
+    }
+    if not apply:
+        return result
+    zabbix_api_call(
+        "configuration.import",
+        {
+            "format": "yaml",
+            "rules": {
+                "template_groups": {"createMissing": True},
+                "templates": {"createMissing": True, "updateExisting": True},
+                "items": {"createMissing": True, "updateExisting": True},
+                "discoveryRules": {"createMissing": True, "updateExisting": True},
+                "triggers": {"createMissing": True, "updateExisting": True},
+                "valueMaps": {"createMissing": True, "updateExisting": True},
+            },
+            "source": source,
+        },
+    )
+    result["imported"] = True
+    return result
+
+
+def extract_template_names(source: str) -> list[str]:
+    try:
+        data = yaml_safe_load(source)
+    except Exception:
+        return []
+    export = data.get("zabbix_export") if isinstance(data, dict) else None
+    templates = export.get("templates") if isinstance(export, dict) else None
+    if not isinstance(templates, list):
+        return []
+    return [str(item.get("template") or item.get("name")) for item in templates if isinstance(item, dict)]
+
+
+def yaml_safe_load(source: str) -> Any:
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ConfigError("PyYAML is required for template import metadata. Install with: pip install pyyaml") from exc
+    return yaml.safe_load(source)
+
+
+def public_host_plan(plan: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    public = {key: value for key, value in plan.items() if not key.startswith("_")}
+    public["tags"] = zabbix_merge_tags(public.get("tags") or [], [zabbix_managed_tag_config(config)])
+    return public
+
+
 def log_line(message: str) -> None:
     print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}", flush=True)
 
@@ -1774,7 +2211,7 @@ def run_daemon(command: str, interval_seconds: int) -> None:
                 apply_zabbix_config(config)
                 workspaces = config_workspaces(config)
                 use_workspace_env(workspaces[0])
-                zabbix_host = env("ZABBIX_HOST", required=False, default="HPE Aruba Central")
+                zabbix_host = apply_global_host_prefix(collector_host_name())
                 msp_token = get_msp_token()
                 tenants = get_workspace_tenants(msp_token, workspaces[0])
                 if command == "push-aps":
@@ -1785,12 +2222,12 @@ def run_daemon(command: str, interval_seconds: int) -> None:
                     lines = build_all_sender_lines(msp_token, tenants, zabbix_host, workspaces[0])
                 else:
                     raise CentralError(f"Unsupported daemon command: {command}")
-            result = run_zabbix_sender(lines)
+            result = run_zabbix_sender_discovery_first(lines)
             level = "ok" if result.get("returncode") == 0 else "error"
             log_line(
                 f"{level} command={command} sent_lines={result.get('sent_lines')} "
                 f"returncode={result.get('returncode')} elapsed={round(time.time() - started, 3)}s "
-                f"stdout={result.get('stdout')!r} stderr={result.get('stderr')!r}"
+                f"stdout={zabbix_sender_stdout(result)!r} stderr={zabbix_sender_stderr(result)!r}"
             )
         except Exception as exc:
             log_line(f"error command={command} elapsed={round(time.time() - started, 3)}s error={exc}")
@@ -2056,34 +2493,17 @@ def licenses_lld(subscriptions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def alerts_lld(alerts: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "data": [
-            {
-                "{#TENANT_ID}": alert.get("tenant_id"),
-                "{#TENANT_NAME}": alert.get("tenant_name"),
-                "{#WORKSPACE_NAME}": alert.get("workspace_name") or alert.get("tenant_name"),
-                "{#ALERT_ID}": alert.get("id"),
-                "{#ALERT_NAME}": alert.get("name"),
-                "{#ALERT_SEVERITY}": alert.get("severity"),
-                "{#ALERT_CATEGORY}": alert.get("category"),
-                "{#ALERT_DEVICE_TYPE}": alert.get("device_type"),
-                "{#DEVICE_ID}": alert.get("device_id"),
-                "{#SITE_ID}": alert.get("site_id"),
-                "{#SITE_NAME}": alert.get("site_name"),
-            }
-            for alert in alerts
-            if alert.get("tenant_id") and alert.get("id")
-        ]
-    }
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="HPE Aruba Central Next Gen multi-workspace collector for Zabbix")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("config-check", help="Validate workspaces.json without sending data")
     sub.add_parser("auth-check", help="Validate token creation for every workspace without sending data to Zabbix")
     sub.add_parser("summary", help="Print workspace, tenant, and device summary")
+    sub.add_parser("plan-zabbix-hosts", help="Print planned Zabbix collector, site, and device hosts without calling the Zabbix API")
+    import_template_parser = sub.add_parser("import-zabbix-template", help="Import or update the bundled Zabbix template through the Zabbix API")
+    import_template_parser.add_argument("--apply", action="store_true", help="Actually import the template. Without this flag, only prints the import plan.")
+    sync_parser = sub.add_parser("sync-zabbix-hosts", help="Create or update planned Zabbix host groups and hosts through the Zabbix API")
+    sync_parser.add_argument("--apply", action="store_true", help="Actually create/update hosts. Without this flag, only prints the plan.")
     push_all_parser = sub.add_parser("push-all", help="Push AP, radio, switch, and interface data to Zabbix trapper items")
     push_all_parser.add_argument("--dry-run", action="store_true", help="Print zabbix_sender input instead of sending")
     daemon_parser = sub.add_parser("daemon", help="Run push command forever at a fixed interval")
@@ -2170,12 +2590,24 @@ def main() -> int:
         output_json(health)
         return 0
 
+    if args.command == "plan-zabbix-hosts":
+        output_json(sync_zabbix_hosts(config, apply=False))
+        return 0
+
+    if args.command == "import-zabbix-template":
+        output_json(import_zabbix_template(config, apply=bool(args.apply)))
+        return 0
+
+    if args.command == "sync-zabbix-hosts":
+        output_json(sync_zabbix_hosts(config, apply=bool(args.apply)))
+        return 0
+
     if args.command == "push-all":
         lines = build_all_config_sender_lines(config)
         if args.dry_run:
             print("\n".join(lines))
         else:
-            output_json(run_zabbix_sender(lines))
+            output_json(run_zabbix_sender_discovery_first(lines))
         return 0
 
     parser.error("Unknown command")

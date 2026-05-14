@@ -1,23 +1,38 @@
 {
-  "config_version": "0.5.1",
+  "config_version": "1.0.0-dev",
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",
-    "host": "HPE Aruba Central RETI",
-    "sender_path": "zabbix_sender"
+    "collector_host": "HPE Aruba Central Collector",
+    "sender_path": "zabbix_sender",
+    "api_url": "https://zabbix.example.com/api_jsonrpc.php",
+    "api_token": "zabbix-api-token",
+    "unmapped_host_group": "HPE Aruba Central/Unmapped",
+    "host_name_prefix": "",
+    "managed_tag": {
+      "tag": "hpe-aruba-central-ng",
+      "value": ""
+    },
+    "host_tags": {
+      "ap": "WiFi",
+      "switch": "Switch",
+      "gateway": "Gateway"
+    },
+    "templates": {
+      "collector": "HPE Aruba Central Collector",
+      "site": "HPE Aruba Central Site",
+      "ap": "HPE Aruba Central AP",
+      "switch": "HPE Aruba Central Switch",
+      "gateway": "HPE Aruba Central Gateway"
+    }
   },
   "collector": {
     "interval_seconds": 300,
     "collect_client_counts": false,
-    "alert_mode": "items",
+    "lld_settle_seconds": 10,
     "version_check_enabled": true,
     "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
-    "version_check_ref": "main",
-    "device_type_tags": {
-      "ap": "ap",
-      "switch": "switch",
-      "gateway": "gateway"
-    }
+    "version_check_ref": "main"
   },
   "workspaces": [
     {
@@ -27,7 +42,13 @@
       "client_id": "client-id",
       "client_secret": "client-secret",
       "central_base_url": "https://de2.api.central.arubanetworks.com",
-      "tenant_allowlist": []
+      "tenant_allowlist": [],
+      "tenant_mappings": [
+        {
+          "tenant_name": "Central tenant name",
+          "host_prefix": "CUSTOMER"
+        }
+      ]
     },
     {
       "name": "WORKSPACE STANDALONE",
@@ -35,7 +56,10 @@
       "workspace_id": "workspace-id",
       "client_id": "client-id",
       "client_secret": "client-secret",
-      "central_base_url": "https://de2.api.central.arubanetworks.com"
+      "central_base_url": "https://de2.api.central.arubanetworks.com",
+      "mapping": {
+        "host_prefix": "CUSTOMER"
+      }
     }
   ]
 }
