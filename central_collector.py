@@ -16,9 +16,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "1.0.0-dev"
-TEMPLATE_VERSION = "1.0.0-dev"
-CONFIG_SCHEMA_VERSION = "1.0.0-dev"
+COLLECTOR_VERSION = "1.0.1"
+TEMPLATE_VERSION = "1.0.1"
+CONFIG_SCHEMA_VERSION = "1.0.1"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5

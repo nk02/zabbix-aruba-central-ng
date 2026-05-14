@@ -88,7 +88,13 @@ Copy the project to a server or PC that can reach:
 - GreenLake/New Central APIs over HTTPS
 - Zabbix server or proxy on trapper port `10051`
 
-Install Python 3 and `zabbix_sender`. On Windows, `zabbix_sender.exe` can stay in the collector folder.
+Requirements:
+
+- Zabbix 7.0 or newer.
+- Python 3.10 or newer.
+- `zabbix_sender`.
+
+On Windows, `zabbix_sender.exe` can stay in the collector folder.
 
 Copy the example config:
 
@@ -100,7 +106,7 @@ Example:
 
 ```json
 {
-  "config_version": "1.0.0-dev",
+  "config_version": "1.0.1",
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",
@@ -382,3 +388,7 @@ Never commit:
 - `workspaces.json`
 - `.token_cache.json`
 - `zabbix_sender.exe`
+
+## License
+
+This project is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).

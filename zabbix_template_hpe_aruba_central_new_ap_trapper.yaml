@@ -20,7 +20,7 @@ zabbix_export:
       description: Raise a warning when a subscription expires within this number
         of days.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 1.0.0-dev
+      value: 1.0.1
       description: Version of this Zabbix template package.
     items:
     - uuid: 4e57de4d770d43a2bbc53933328a8b43
@@ -255,6 +255,7 @@ zabbix_export:
         expression: last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_hosts_count)>0
           and length(last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_host_names))>=0
         name: 'HPE Central collector: managed Zabbix hosts are no longer discovered in Central'
+        event_name: 'HPE Central collector: stale managed hosts: {ITEM.LASTVALUE2}'
         opdata: 'Stale hosts: {ITEM.LASTVALUE2}'
         priority: WARNING
         tags:
