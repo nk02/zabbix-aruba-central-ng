@@ -236,6 +236,42 @@ zabbix_export:
       tags:
       - tag: component
         value: collector
+    - uuid: e229b4f3b2f9450e87dc530f0bcda79a
+      name: Collector stale managed hosts count
+      type: DEPENDENT
+      key: central.collector.stale_managed_hosts_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.zabbix_managed_hosts_status.stale_hosts_count
+      master_item:
+        key: central.collector.health
+      tags:
+      - tag: component
+        value: collector
+      triggers:
+      - uuid: 234e60f5599c4f6a95a83c8face0b8e1
+        expression: last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_hosts_count)>0
+        name: 'HPE Central collector: managed Zabbix hosts are no longer discovered in Central'
+        priority: WARNING
+        tags:
+        - tag: scope
+          value: notice
+    - uuid: 6090b1435d9b47bca942832de4c0e207
+      name: Collector stale managed hosts
+      type: DEPENDENT
+      key: central.collector.stale_managed_hosts
+      value_type: TEXT
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.zabbix_managed_hosts_status.stale_hosts
+      master_item:
+        key: central.collector.health
+      tags:
+      - tag: component
+        value: collector
     discovery_rules:
     - uuid: 2f6459e3c7024a9f87beb2352328406d
       name: HPE GreenLake subscription discovery

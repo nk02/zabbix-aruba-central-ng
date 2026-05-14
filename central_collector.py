@@ -1704,9 +1704,10 @@ def build_all_sender_lines(
 def build_all_config_sender_lines(config: dict[str, Any] | None) -> list[str]:
     health, all_lines = collect_all_config_payload(config)
     collector_host = apply_global_host_prefix(collector_host_name())
-    lines = [sender_line(collector_host, "central.collector.health", health)] + all_lines
     try:
         plans = collect_host_plans(config or {})
+        health["zabbix_managed_hosts_status"] = collect_zabbix_managed_hosts_status(config or {}, plans)
+        lines = [sender_line(collector_host, "central.collector.health", health)] + all_lines
         return retarget_sender_lines(lines, host_lookup_from_plans(plans), collector_host)
     except Exception as exc:
         health["host_retargeting_status"] = {"status": "error", "error": str(exc)}
@@ -1990,6 +1991,46 @@ def zabbix_get_host(host: str) -> dict[str, Any] | None:
     if isinstance(hosts, list) and hosts:
         return hosts[0]
     return None
+
+
+def zabbix_get_managed_hosts(config: dict[str, Any]) -> list[dict[str, Any]]:
+    managed_tag = zabbix_managed_tag_config(config)
+    hosts = zabbix_api_call(
+        "host.get",
+        {
+            "output": ["hostid", "host", "name", "status"],
+            "selectTags": "extend",
+        },
+    )
+    if not isinstance(hosts, list):
+        return []
+    return [host for host in hosts if isinstance(host, dict) and zabbix_has_managed_tag(host.get("tags"), managed_tag)]
+
+
+def collect_zabbix_managed_hosts_status(config: dict[str, Any], plans: list[dict[str, Any]]) -> dict[str, Any]:
+    apply_zabbix_config(config)
+    if not env("ZABBIX_API_URL", required=False, default="") or not env("ZABBIX_API_TOKEN", required=False, default=""):
+        return {"status": "skipped", "reason": "missing Zabbix API configuration"}
+    planned_hosts = {str(plan.get("host") or "") for plan in plans if plan.get("host")}
+    managed_hosts = zabbix_get_managed_hosts(config)
+    stale_hosts = [
+        {
+            "hostid": host.get("hostid"),
+            "host": host.get("host"),
+            "name": host.get("name"),
+            "status": host.get("status"),
+        }
+        for host in managed_hosts
+        if str(host.get("host") or "") not in planned_hosts
+    ]
+    stale_hosts.sort(key=lambda item: str(item.get("host") or ""))
+    return {
+        "status": "ok",
+        "managed_hosts_count": len(managed_hosts),
+        "planned_hosts_count": len(planned_hosts),
+        "stale_hosts_count": len(stale_hosts),
+        "stale_hosts": stale_hosts,
+    }
 
 
 def zabbix_tags_equal(current: Any, desired: list[dict[str, str]]) -> bool:
