@@ -106,7 +106,7 @@ Example:
 
 ```json
 {
-  "config_version": "1.0.3",
+  "config_version": "1.0.4",
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",
@@ -138,6 +138,7 @@ Example:
     "collect_client_counts": false,
     "auto_import_template": true,
     "api_workers": 4,
+    "api_rate_limit_per_second": 8,
     "lld_settle_seconds": 10,
     "version_check_enabled": true,
     "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
@@ -186,6 +187,8 @@ Modes:
 `auto_import_template` imports the bundled local Zabbix template automatically before host synchronization when the installed Zabbix template version is missing or different. It does not download templates from GitHub; update the collector files with `git pull` or a release download first.
 
 `api_workers` controls concurrent Central API calls for per-device detail collection. The default is intentionally conservative because Central can rate-limit aggressive parallel collection.
+
+`api_rate_limit_per_second` throttles Central API requests across collector threads. HPE documents a limit of 10 API calls per second across the Central account, so the default is `8` to keep a small safety margin.
 
 `lld_settle_seconds` controls how long `push-all` waits between sending discovery data and sending item values. This reduces first-run failed values while Zabbix creates low-level discovery item prototypes.
 

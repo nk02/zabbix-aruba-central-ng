@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -17,9 +18,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "1.0.3"
+COLLECTOR_VERSION = "1.0.4"
 TEMPLATE_VERSION = "1.0.3"
-CONFIG_SCHEMA_VERSION = "1.0.3"
+CONFIG_SCHEMA_VERSION = "1.0.4"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -27,6 +28,9 @@ GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
 TENANTS_PATH = "/workspaces/v1/msp-tenants"
 ACTIVE_CENTRAL_BASE_URL: str | None = None
+CENTRAL_API_RATE_LIMIT_LOCK = threading.Lock()
+CENTRAL_API_RATE_LIMIT_WINDOW = 0.0
+CENTRAL_API_RATE_LIMIT_COUNT = 0
 CENTRAL_BASE_URLS = [
     "https://de1.api.central.arubanetworks.com",
     "https://de2.api.central.arubanetworks.com",
@@ -49,6 +53,7 @@ RECOMMENDED_CONFIG_PATHS = (
     "collector.collect_client_counts",
     "collector.auto_import_template",
     "collector.api_workers",
+    "collector.api_rate_limit_per_second",
     "collector.version_check_enabled",
     "collector.version_check_base_url",
     "collector.version_check_ref",
@@ -124,6 +129,8 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["CENTRAL_AUTO_IMPORT_TEMPLATE"] = "true" if collector["auto_import_template"] else "false"
         if collector.get("api_workers") is not None:
             os.environ["CENTRAL_API_WORKERS"] = str(collector["api_workers"])
+        if collector.get("api_rate_limit_per_second") is not None:
+            os.environ["CENTRAL_API_RATE_LIMIT_PER_SECOND"] = str(collector["api_rate_limit_per_second"])
         if collector.get("lld_settle_seconds") is not None:
             os.environ["CENTRAL_LLD_SETTLE_SECONDS"] = str(collector["lld_settle_seconds"])
         if collector.get("version_check_enabled") is not None:
@@ -230,6 +237,23 @@ def env_int(name: str, default: int, minimum: int | None = None, maximum: int | 
     if maximum is not None:
         value = min(maximum, value)
     return value
+
+
+def throttle_central_api_request() -> None:
+    global CENTRAL_API_RATE_LIMIT_WINDOW, CENTRAL_API_RATE_LIMIT_COUNT
+
+    limit = env_int("CENTRAL_API_RATE_LIMIT_PER_SECOND", 8, minimum=1, maximum=10)
+    while True:
+        with CENTRAL_API_RATE_LIMIT_LOCK:
+            now = time.monotonic()
+            if now - CENTRAL_API_RATE_LIMIT_WINDOW >= 1:
+                CENTRAL_API_RATE_LIMIT_WINDOW = now
+                CENTRAL_API_RATE_LIMIT_COUNT = 0
+            if CENTRAL_API_RATE_LIMIT_COUNT < limit:
+                CENTRAL_API_RATE_LIMIT_COUNT += 1
+                return
+            sleep_for = max(0.01, 1 - (now - CENTRAL_API_RATE_LIMIT_WINDOW))
+        time.sleep(sleep_for)
 
 
 def parse_version(value: str) -> tuple[int, ...]:
@@ -396,6 +420,7 @@ def request_json(
 
     retry_attempts = env_int("CENTRAL_API_RETRY_ATTEMPTS", 3, minimum=1, maximum=8)
     for attempt in range(1, retry_attempts + 1):
+        throttle_central_api_request()
         req = Request(url, data=data, headers=headers, method=method)
         try:
             with urlopen(req, timeout=60) as response:

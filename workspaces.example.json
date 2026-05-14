@@ -1,5 +1,5 @@
 {
-  "config_version": "1.0.3",
+  "config_version": "1.0.4",
   "zabbix": {
     "server": "zabbix.example.com",
     "port": "10051",
@@ -31,6 +31,7 @@
     "collect_client_counts": false,
     "auto_import_template": true,
     "api_workers": 4,
+    "api_rate_limit_per_second": 8,
     "lld_settle_seconds": 10,
     "version_check_enabled": true,
     "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
