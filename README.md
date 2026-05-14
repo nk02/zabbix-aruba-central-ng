@@ -104,7 +104,8 @@ Compila `workspaces.json`:
     "interval_seconds": 300,
     "collect_client_counts": false,
     "version_check_enabled": true,
-    "version_check_base_url": "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng/main",
+    "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
+    "version_check_ref": "main",
     "device_type_tags": {
       "ap": "ap",
       "switch": "switch",
@@ -150,7 +151,7 @@ Modalita':
 
 Se GitHub contiene una versione piu' recente, il template genera un alert informativo. Se GitHub non e' raggiungibile, lo stato diventa `unknown` ma la raccolta dati continua e non viene generato l'alert di aggiornamento.
 
-`version_check_base_url` puo' essere cambiato se usi un fork o un branch diverso.
+`version_check_base_url` e `version_check_ref` possono essere cambiati se usi un fork o un branch diverso. Di default il collector usa la GitHub Contents API, cosi' evita eventuali cache del servizio raw.
 
 `device_type_tags` definisce i valori usati nel tag `device_type` degli item scoperti. Puoi adeguarli agli standard gia' usati sugli host monitorati localmente, per esempio `access-point`, `network-switch` o altri valori interni. Il valore `gateway` e' gia' previsto per coerenza, anche se la raccolta gateway non e' ancora implementata.
 

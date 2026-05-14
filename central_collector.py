@@ -15,9 +15,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "0.2.0"
+COLLECTOR_VERSION = "0.2.1"
 TEMPLATE_VERSION = "0.2.0"
-GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng/main"
+GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
+GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -103,6 +104,8 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["CENTRAL_VERSION_CHECK_ENABLED"] = "true" if collector["version_check_enabled"] else "false"
         if collector.get("version_check_base_url") is not None:
             os.environ["CENTRAL_VERSION_CHECK_BASE_URL"] = str(collector["version_check_base_url"])
+        if collector.get("version_check_ref") is not None:
+            os.environ["CENTRAL_VERSION_CHECK_REF"] = str(collector["version_check_ref"])
         device_type_tags = collector.get("device_type_tags")
         if isinstance(device_type_tags, dict):
             mapping = {
@@ -225,6 +228,20 @@ def request_text(url: str, timeout: int = VERSION_CHECK_TIMEOUT_SECONDS) -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
+def request_remote_repo_file(base_url: str, ref: str, path: str) -> str:
+    if "api.github.com" in base_url and "/contents" in base_url:
+        url = f"{base_url.rstrip('/')}/{path}?{urlencode({'ref': ref})}"
+        req = Request(url, headers={"Accept": "application/vnd.github+json"}, method="GET")
+        with urlopen(req, timeout=VERSION_CHECK_TIMEOUT_SECONDS) as response:
+            data = json.loads(response.read().decode("utf-8", errors="replace"))
+        content = str(data.get("content") or "")
+        encoding = str(data.get("encoding") or "")
+        if encoding != "base64" or not content:
+            raise CentralError(f"Unexpected GitHub contents response for {path}")
+        return base64.b64decode(content).decode("utf-8", errors="replace")
+    return request_text(f"{base_url.rstrip('/')}/{path}")
+
+
 def extract_python_constant(text: str, name: str) -> str | None:
     match = re.search(rf'^{re.escape(name)}\s*=\s*["\']([^"\']+)["\']', text, flags=re.MULTILINE)
     return match.group(1) if match else None
@@ -259,9 +276,10 @@ def collect_version_status() -> dict[str, Any]:
     if not enabled:
         return result
 
-    base_url = env("CENTRAL_VERSION_CHECK_BASE_URL", required=False, default=GITHUB_RAW_BASE_URL).rstrip("/")
+    base_url = env("CENTRAL_VERSION_CHECK_BASE_URL", required=False, default=GITHUB_CONTENTS_BASE_URL).rstrip("/")
+    ref = env("CENTRAL_VERSION_CHECK_REF", required=False, default=GITHUB_REF)
     try:
-        collector_text = request_text(f"{base_url}/central_collector.py")
+        collector_text = request_remote_repo_file(base_url, ref, "central_collector.py")
         latest_collector = extract_python_constant(collector_text, "COLLECTOR_VERSION")
         result["collector"] = build_version_component(
             "collector",
@@ -273,7 +291,7 @@ def collect_version_status() -> dict[str, Any]:
         result["collector"] = build_version_component("collector", COLLECTOR_VERSION, None, str(exc))
 
     try:
-        template_text = request_text(f"{base_url}/zabbix_template_hpe_aruba_central_new_ap_trapper.yaml")
+        template_text = request_remote_repo_file(base_url, ref, "zabbix_template_hpe_aruba_central_new_ap_trapper.yaml")
         latest_template = extract_template_version(template_text)
         result["template"] = build_version_component(
             "template",
