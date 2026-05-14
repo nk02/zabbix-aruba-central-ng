@@ -43,6 +43,8 @@ Riferimenti ufficiali:
 - [HPE GreenLake API Client Credentials](https://developer.greenlake.hpe.com/docs/greenlake/services/credentials/public)
 - [HPE GreenLake API authentication](https://developer.greenlake.hpe.com/docs/greenlake/guides/public/authentication/authentication/)
 - [HPE GreenLake Workspace Management](https://developer.greenlake.hpe.com/docs/greenlake/services/workspace/public)
+- [HPE GreenLake Subscription Management](https://developer.greenlake.hpe.com/docs/greenlake/services/subscription-management/public/)
+- [New Central Streaming APIs](https://developer.arubanetworks.com/new-central/docs/streaming-api-getting-started)
 
 ## 2. Zabbix
 
@@ -64,6 +66,7 @@ Nel template puoi personalizzare la macro:
 
 ```text
 {$CENTRAL.COLLECTOR.NODATA}  default 15m
+{$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}  default 30
 ```
 
 Gli item scoperti hanno tag:
@@ -250,6 +253,15 @@ central.switch.interfaces.discovery
 central.switch.interface.raw[<tenant-id>,<serial>,<port-index>]
 ```
 
+Licenze GreenLake:
+
+```text
+central.licenses.discovery
+central.license.raw[<tenant-id>,<subscription-id>]
+```
+
+Le subscription vengono lette da GreenLake Subscription Management, non dalle API `network-monitoring`. Il collector usa `GET /subscriptions/v1/subscriptions` per ogni tenant/workspace e invia a Zabbix quantita' totale, quantita' disponibile, stato, tier e giorni alla scadenza. Vengono monitorate solo le subscription attive (`STARTED`/`ACTIVE`), cosi' le vecchie evaluation gia' terminate non generano rumore. La subscription key completa non viene inviata a Zabbix: viene usato l'ID subscription e solo il suffisso della key per riconoscimento umano.
+
 Il collector health include:
 
 - `workspace_count`
@@ -262,6 +274,21 @@ Il collector health include:
 - `version_status`
 - `sent_lines`
 - `elapsed_seconds`
+
+## Streaming API
+
+Le Streaming API di New Central possono essere utili, ma sono un flusso diverso dal polling REST usato da questo collector. Central espone WebSocket `wss://<central-base-url>/network-services/v1alpha1/<endpoint-path>`, autenticati con lo stesso bearer token OAuth delle REST API. Gli eventi arrivano come CloudEvents codificati in protobuf, quindi bisogna decodificare prima l'envelope CloudEvent e poi il payload specifico dell'evento.
+
+Nota: le Streaming API sono disponibili solo per device con Central Advanced tier.
+
+Usi sensati per una versione futura:
+
+- ricevere eventi AP monitoring quasi real time;
+- ricevere audit trail e cambi di configurazione;
+- trasformare eventi specifici in trapper item o in problem event Zabbix;
+- mantenere il polling REST come baseline periodica, usando lo streaming solo per eventi immediati.
+
+Non lo mischierei nel processo `push-all`: meglio un secondo comando/daemon dedicato, con reconnect automatico e refresh token, per esempio `central_collector.py stream --event ap-monitoring`.
 
 ## Note di sicurezza
 

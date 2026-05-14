@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -15,8 +16,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "0.2.1"
-TEMPLATE_VERSION = "0.2.0"
+COLLECTOR_VERSION = "0.3.0"
+TEMPLATE_VERSION = "0.3.0"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -524,6 +525,29 @@ def get_all_pages(token: str, path: str, query: dict[str, str | int] | None = No
     return all_items
 
 
+def get_greenlake_all_pages(token: str, path: str, query: dict[str, str | int] | None = None) -> list[dict[str, Any]]:
+    params: dict[str, str | int] = {"limit": 100, "offset": 0}
+    if query:
+        params.update(query)
+
+    all_items: list[dict[str, Any]] = []
+    while True:
+        data = request_json("GET", GREENLAKE_API + path, token=token, query=params)
+        items = extract_items(data)
+        all_items.extend(items)
+        total = data.get("total")
+        count = data.get("count")
+        offset = int(params.get("offset") or 0)
+        limit = int(params.get("limit") or len(items) or 100)
+        if isinstance(total, int):
+            if offset + len(items) >= total:
+                break
+        elif not items or len(items) < limit:
+            break
+        params["offset"] = offset + (count if isinstance(count, int) and count > 0 else limit)
+    return all_items
+
+
 def extract_items(data: dict[str, Any]) -> list[dict[str, Any]]:
     for key in ("items", "switches", "devices", "data"):
         values = data.get(key)
@@ -665,6 +689,27 @@ def get_connected_clients_count(token: str, serial: str, site_id: str | None = N
     return len(items)
 
 
+def get_subscriptions_for_tenant(msp_token: str, tenant: dict[str, Any]) -> list[dict[str, Any]]:
+    tenant_id = str(tenant.get("id") or "")
+    if not tenant_id:
+        return []
+    token = tenant_token(msp_token, tenant)
+    try:
+        subscriptions = get_greenlake_all_pages(token, "/subscriptions/v1/subscriptions")
+    except CentralError as exc:
+        if "HTTP 401" not in str(exc):
+            raise
+        clear_cached_token(f"tenant:{tenant_id}")
+        token = tenant_token(msp_token, tenant, force_refresh=True)
+        subscriptions = get_greenlake_all_pages(token, "/subscriptions/v1/subscriptions")
+    for subscription in subscriptions:
+        subscription["_tenant_id"] = tenant_id
+        subscription["_tenant_name"] = tenant_name(tenant)
+        subscription["_workspace_id"] = tenant.get("_workspace_id")
+        subscription["_workspace_name"] = tenant.get("_workspace_name")
+    return subscriptions
+
+
 def normalize_switch(switch: dict[str, Any]) -> dict[str, Any]:
     return {
         "workspace_id": switch.get("_workspace_id"),
@@ -785,6 +830,75 @@ def normalize_switch_interface(interface: dict[str, Any]) -> dict[str, Any]:
         "stp_port_role": interface.get("stpPortRole"),
         "uplink": interface.get("uplink"),
     }
+
+
+def parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def days_until(value: Any) -> float | None:
+    parsed = parse_iso_datetime(value)
+    if not parsed:
+        return None
+    return round((parsed - datetime.now(timezone.utc)).total_seconds() / 86400, 3)
+
+
+def to_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def license_device_type_tag(subscription_type: Any) -> str:
+    value = str(subscription_type or "").upper()
+    if "AP" in value:
+        return device_type_tag("ACCESS_POINT")
+    if "SWITCH" in value or "CX" in value:
+        return device_type_tag("SWITCH")
+    if "GW" in value or "GATEWAY" in value:
+        return device_type_tag("GATEWAY")
+    return "license"
+
+
+def normalize_subscription(subscription: dict[str, Any]) -> dict[str, Any]:
+    key = str(subscription.get("key") or "")
+    end_time = subscription.get("endTime")
+    expiry_days = days_until(end_time)
+    return {
+        "workspace_id": subscription.get("_workspace_id"),
+        "workspace_name": subscription.get("_workspace_name"),
+        "tenant_id": subscription.get("_tenant_id"),
+        "tenant_name": subscription.get("_tenant_name"),
+        "id": subscription.get("id"),
+        "key_suffix": key[-4:] if key else "",
+        "subscription_type": subscription.get("subscriptionType"),
+        "subscription_status": subscription.get("subscriptionStatus"),
+        "tier": subscription.get("tier"),
+        "tier_description": subscription.get("tierDescription"),
+        "sku": subscription.get("sku") or subscription.get("productSku"),
+        "sku_description": subscription.get("skuDescription") or subscription.get("productDescription"),
+        "product_type": subscription.get("productType"),
+        "quantity": to_int(subscription.get("quantity")) or 0,
+        "available_quantity": to_int(subscription.get("availableQuantity")) or 0,
+        "start_time": subscription.get("startTime"),
+        "end_time": end_time,
+        "days_until_expiry": expiry_days if expiry_days is not None else 999999,
+        "is_eval": subscription.get("isEval"),
+        "tags": subscription.get("tags") if isinstance(subscription.get("tags"), dict) else {},
+    }
+
+
+def is_monitorable_subscription(subscription: dict[str, Any]) -> bool:
+    status = str(subscription.get("subscription_status") or "").upper()
+    return status in ("STARTED", "ACTIVE")
 
 
 def normalize_radios(radios: Any) -> list[dict[str, Any]]:
@@ -977,10 +1091,31 @@ def build_switch_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zab
     return lines
 
 
+def build_license_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
+    subscriptions: list[dict[str, Any]] = []
+    lines: list[str] = []
+    for tenant in tenants:
+        subscriptions.extend(
+            subscription
+            for subscription in (normalize_subscription(item) for item in get_subscriptions_for_tenant(msp_token, tenant))
+            if is_monitorable_subscription(subscription)
+        )
+
+    lines.append(sender_line(zabbix_host, "central.licenses.discovery", licenses_lld(subscriptions)))
+    for subscription in subscriptions:
+        tenant_id = str(subscription.get("tenant_id") or "")
+        subscription_id = str(subscription.get("id") or "")
+        if not tenant_id or not subscription_id:
+            continue
+        lines.append(sender_line(zabbix_host, f"central.license.raw[{tenant_id},{subscription_id}]", subscription))
+    return lines
+
+
 def build_all_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
     started = time.time()
     ap_lines = build_ap_sender_lines(msp_token, tenants, zabbix_host)
     switch_lines = build_switch_sender_lines(msp_token, tenants, zabbix_host)
+    license_lines = build_license_sender_lines(msp_token, tenants, zabbix_host)
     inventory = collect_device_inventory_summary(msp_token, tenants)
     health = {
         "status": "ok",
@@ -989,11 +1124,11 @@ def build_all_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix
         "device_counts_by_type": inventory["device_counts_by_type"],
         "device_counts_by_tenant": inventory["device_counts_by_tenant"],
         "devices_total": inventory["devices_total"],
-        "sent_lines": len(ap_lines) + len(switch_lines),
+        "sent_lines": len(ap_lines) + len(switch_lines) + len(license_lines),
         "elapsed_seconds": round(time.time() - started, 3),
     }
     return [sender_line(zabbix_host, "central.collector.health", health)] + [
-        line for line in ap_lines + switch_lines if " central.collector.health " not in line
+        line for line in ap_lines + switch_lines + license_lines if " central.collector.health " not in line
     ]
 
 
@@ -1013,6 +1148,7 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
         "central.ap.radios.discovery": [],
         "central.switches.discovery": [],
         "central.switch.interfaces.discovery": [],
+        "central.licenses.discovery": [],
     }
     workspace_summaries: list[dict[str, Any]] = []
     workspace_count = 0
@@ -1335,6 +1471,26 @@ def radios_lld(radios: list[dict[str, Any]]) -> dict[str, Any]:
             }
             for radio in radios
             if radio.get("tenant_id") and radio.get("ap_serial") and radio.get("radio_number") is not None
+        ]
+    }
+
+
+def licenses_lld(subscriptions: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "data": [
+            {
+                "{#TENANT_ID}": subscription.get("tenant_id"),
+                "{#TENANT_NAME}": subscription.get("tenant_name"),
+                "{#WORKSPACE_NAME}": subscription.get("workspace_name") or subscription.get("tenant_name"),
+                "{#DEVICE_TYPE_TAG}": license_device_type_tag(subscription.get("subscription_type")),
+                "{#LICENSE_ID}": subscription.get("id"),
+                "{#LICENSE_TYPE}": subscription.get("subscription_type"),
+                "{#LICENSE_TIER}": subscription.get("tier"),
+                "{#LICENSE_SKU}": subscription.get("sku"),
+                "{#LICENSE_KEY_SUFFIX}": subscription.get("key_suffix"),
+            }
+            for subscription in subscriptions
+            if subscription.get("tenant_id") and subscription.get("id")
         ]
     }
 
