@@ -1,99 +1,99 @@
-# HPE Aruba Central Next Gen collector for Zabbix
+# HPE Aruba Central Next Gen Collector for Zabbix
 
-Collector Python per monitorare HPE Aruba Networking Central Next Gen tramite API GreenLake/New Central e inviare i dati a Zabbix con `zabbix_sender` e item trapper.
+Python collector for HPE Aruba Networking Central Next Gen. It reads data from GreenLake/New Central APIs and pushes values to Zabbix trapper items with `zabbix_sender`.
 
-Il collector gira fuori da Zabbix: e' adatto anche a Zabbix Cloud, dove non si possono usare external scripts locali.
+The collector runs outside Zabbix, so it also works with Zabbix Cloud where local external scripts are not available.
 
-## Funzionamento
+## How It Works
 
-Il flusso e':
+1. The collector reads one or more GreenLake workspaces from `workspaces.json`.
+2. For each workspace it creates an OAuth access token from `workspace_id`, `client_id`, and `client_secret`.
+3. For MSP workspaces, it discovers MSP tenants and exchanges the MSP token for tenant tokens.
+4. It polls New Central APIs for APs, radios, switches, switch interfaces, and GreenLake subscriptions.
+5. It builds aggregated low-level discovery payloads.
+6. It sends discovery and raw values to one Zabbix trapper host.
 
-1. Il collector legge uno o piu' workspace da `workspaces.json`.
-2. Per ogni workspace genera un access token GreenLake usando `workspace_id`, `client_id` e `client_secret`.
-3. Se il workspace e' MSP, legge i tenant e fa token exchange per ogni tenant.
-4. Interroga le API New Central per AP e switch.
-5. Costruisce le LLD aggregate e i valori raw.
-6. Invia tutto all'host trapper Zabbix con `zabbix_sender`.
+The Zabbix template uses dependent items to extract metrics from raw master items. Raw items have `history: 0`; they feed dependent items but do not keep JSON history.
 
-Il template Zabbix usa item dependent per estrarre status, CPU, memoria, radio, porte e collector health dai master item raw. I raw item hanno history a `0`: servono come sorgente dati, ma non conservano storico JSON.
+## GreenLake Credentials
 
-## 1. Credenziali GreenLake e base URL
-
-Per ogni workspace da monitorare recupera:
+For each workspace, collect:
 
 - `workspace_id`
 - `client_id`
 - `client_secret`
 - `central_base_url`
 
-In GreenLake entra nel workspace corretto e apri la gestione del workspace. Crea o rigenera una API Client Credential, quindi copia `Client ID` e `Client Secret` e salvali in modo sicuro. Il secret non va pubblicato nel repository.
+In GreenLake, open the target workspace and create or regenerate API client credentials. Store the client secret securely and never commit it to Git.
 
-Per il `workspace_id`, usa l'ID del workspace GreenLake. Nel caso MSP questo e' il workspace MSP; il collector ricavera' poi i tenant tramite API. Nel caso standalone e' il workspace del cliente.
+For MSP mode, use the MSP workspace ID. The collector will discover tenant workspaces through API calls. For standalone mode, use the customer workspace ID.
 
-Per `central_base_url`, usa il cluster API di New Central del workspace, ad esempio:
+Set `central_base_url` to the New Central API cluster for the workspace, for example:
 
 ```text
 https://de2.api.central.arubanetworks.com
 ```
 
-Esempi comuni sono `de1`, `de2`, `de3`, `gb1`, `us1`, `us2`, `us4`, `us5`, `us6`, `ca1`, `in1`, `jp1`, `au1`, `ae1`. Se il cluster non e' corretto, l'autenticazione GreenLake puo' funzionare ma le chiamate Central possono tornare errori `401`, `400` o dati vuoti.
+Common clusters include `de1`, `de2`, `de3`, `gb1`, `us1`, `us2`, `us4`, `us5`, `us6`, `ca1`, `in1`, `jp1`, `au1`, and `ae1`. If the cluster is wrong, GreenLake authentication can still work while Central API calls return `401`, `400`, or empty data.
 
-Riferimenti ufficiali:
+Official references:
 
 - [HPE GreenLake API Client Credentials](https://developer.greenlake.hpe.com/docs/greenlake/services/credentials/public)
-- [HPE GreenLake API authentication](https://developer.greenlake.hpe.com/docs/greenlake/guides/public/authentication/authentication/)
+- [HPE GreenLake API Authentication](https://developer.greenlake.hpe.com/docs/greenlake/guides/public/authentication/authentication/)
 - [HPE GreenLake Workspace Management](https://developer.greenlake.hpe.com/docs/greenlake/services/workspace/public)
 - [HPE GreenLake Subscription Management](https://developer.greenlake.hpe.com/docs/greenlake/services/subscription-management/public/)
 - [New Central Streaming APIs](https://developer.arubanetworks.com/new-central/docs/streaming-api-getting-started)
 
-## 2. Zabbix
+## Zabbix Setup
 
-Importa il template:
+Import:
 
 ```text
 zabbix_template_hpe_aruba_central_new_ap_trapper.yaml
 ```
 
-Crea un host in Zabbix con lo stesso nome configurato in `workspaces.json`:
+Create one Zabbix host with the same name configured in `workspaces.json`:
 
 ```json
 "host": "HPE Aruba Central"
 ```
 
-Associa il template `HPE Aruba Central New AP by trapper` all'host. Gli item trapper e dependent vengono creati dal template; non serve creare item manuali.
+Attach template `HPE Aruba Central New AP by trapper` to that host. The template creates trapper and dependent items automatically.
 
-Nel template puoi personalizzare la macro:
+Template macros:
 
 ```text
-{$CENTRAL.COLLECTOR.NODATA}  default 15m
-{$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}  default 30
+{$CENTRAL.COLLECTOR.NODATA}                 default 15m
+{$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}      default 30
+{$CENTRAL.TEMPLATE.VERSION}                 package version
 ```
 
-Gli item scoperti hanno tag:
+Discovered items include these tags:
 
 - `tenant = {#TENANT_NAME}`
 - `workspace = {#WORKSPACE_NAME}`
-- `site = {#SITE_NAME}`
+- `site = {#SITE_NAME}` where available
 - `device_type = {#DEVICE_TYPE_TAG}`
+- license items also include `license_scope`, `owner`, and `license_type`
 
-Il valore di `{#DEVICE_TYPE_TAG}` viene generato dal collector e si configura in `workspaces.json`, perche' Zabbix non espande le user macro nei valori dei tag degli item prototype LLD.
+`{#DEVICE_TYPE_TAG}` is generated by the collector, because Zabbix does not expand user macros in LLD item prototype tag values.
 
-## 3. Collector
+## Collector Setup
 
-Copia i file del progetto su un server o PC che possa raggiungere:
+Copy the project to a server or PC that can reach:
 
-- GreenLake/New Central via HTTPS
-- il server o proxy Zabbix sulla porta trapper, normalmente `10051`
+- GreenLake/New Central APIs over HTTPS
+- Zabbix server or proxy on trapper port `10051`
 
-Installa Python 3 e scarica `zabbix_sender` per il sistema operativo del collector. Su Windows puoi lasciare `zabbix_sender.exe` nella stessa cartella e indicarlo nel config.
+Install Python 3 and `zabbix_sender`. On Windows, `zabbix_sender.exe` can stay in the collector folder.
 
-Copia l'esempio:
+Copy the example config:
 
 ```powershell
 Copy-Item .\workspaces.example.json .\workspaces.json
 ```
 
-Compila `workspaces.json`:
+Example:
 
 ```json
 {
@@ -137,80 +137,72 @@ Compila `workspaces.json`:
 }
 ```
 
-Modalita':
+Modes:
 
-- `msp`: workspace MSP, lista tenant, token exchange per tenant.
-- `standalone`: workspace trattato come tenant singolo.
+- `msp`: MSP workspace. The collector discovers tenants and exchanges tokens for each tenant.
+- `standalone`: workspace is treated as a single tenant-like scope.
 
-`tenant_allowlist` e' opzionale: se vuoto monitora tutti i tenant MSP; se valorizzato limita la raccolta a tenant ID o tenant name specifici.
+`tenant_allowlist` is optional. Leave it empty to monitor all MSP tenants, or list tenant IDs/names to limit collection.
 
-`collect_client_counts` e' disabilitato di default per ridurre chiamate API e tempi di raccolta. Abilitalo solo se vuoi raccogliere il numero di client wireless per AP.
+`collect_client_counts` is disabled by default to reduce API calls and collection time. Enable it only if you need wireless client count per AP.
 
-`version_check_enabled` abilita il controllo versioni nel `collector.health`. Il collector scarica da GitHub i file raw del branch `main`, legge le versioni dichiarate e confronta:
+`version_check_enabled` adds collector and template version status to `collector.health`. The collector checks GitHub Contents API and raises update alerts only when a newer version exists.
 
-- versione del collector locale
-- versione del template associata al collector locale
-- ultime versioni disponibili nel repository
+`device_type_tags` defines the value used in the `device_type` Zabbix tag. Adjust it to match your local monitoring standards.
 
-Se GitHub contiene una versione piu' recente, il template genera un alert informativo. Se GitHub non e' raggiungibile, lo stato diventa `unknown` ma la raccolta dati continua e non viene generato l'alert di aggiornamento.
+`workspaces.json` contains secrets and is ignored by Git.
 
-`version_check_base_url` e `version_check_ref` possono essere cambiati se usi un fork o un branch diverso. Di default il collector usa la GitHub Contents API, cosi' evita eventuali cache del servizio raw.
+## Commands
 
-`device_type_tags` definisce i valori usati nel tag `device_type` degli item scoperti. Puoi adeguarli agli standard gia' usati sugli host monitorati localmente, per esempio `access-point`, `network-switch` o altri valori interni. Il valore `gateway` e' gia' previsto per coerenza, anche se la raccolta gateway non e' ancora implementata.
-
-`workspaces.json` contiene segreti ed e' ignorato da git.
-
-## 4. Test e schedulazione
-
-Validazione config:
+Validate config:
 
 ```powershell
 python .\central_collector.py config-check
 ```
 
-Controllo autenticazione:
+Validate authentication:
 
 ```powershell
 python .\central_collector.py auth-check
 ```
 
-Riepilogo workspace, tenant e device:
+Print workspace, tenant, and device summary:
 
 ```powershell
 python .\central_collector.py summary
 ```
 
-Test senza invio:
+Dry-run without sending to Zabbix:
 
 ```powershell
 python .\central_collector.py push-all --dry-run
 ```
 
-Invio a Zabbix:
+Send to Zabbix:
 
 ```powershell
 python .\central_collector.py push-all
 ```
 
-Avvio persistente:
+Run continuously:
 
 ```powershell
 python .\central_collector.py daemon --push-command push-all
 ```
 
-Oppure su Windows:
+Windows helper:
 
 ```powershell
 .\start-collector-daemon.ps1
 ```
 
-Schedulazione Windows ogni 5 minuti:
+Windows scheduled task every 5 minutes:
 
 ```powershell
 schtasks /Create /TN "HPE Central to Zabbix" /SC MINUTE /MO 5 /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command cd 'C:\zabbix\hpe-central-zabbix'; python .\central_collector.py push-all" /F
 ```
 
-Daemon all'avvio sessione Windows:
+Windows daemon at logon:
 
 ```powershell
 schtasks /Create /TN "HPE Central Collector Daemon" /SC ONLOGON /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\zabbix\hpe-central-zabbix\start-collector-daemon.ps1'" /F
@@ -222,7 +214,7 @@ Linux cron:
 */5 * * * * cd /opt/hpe-central-zabbix && /usr/bin/python3 central_collector.py push-all
 ```
 
-## Dati inviati
+## Sent Data
 
 Collector health:
 
@@ -230,21 +222,21 @@ Collector health:
 central.collector.health
 ```
 
-AP:
+APs:
 
 ```text
 central.aps.discovery
 central.ap.raw[<tenant-id>,<serial>]
 ```
 
-Radio AP:
+AP radios:
 
 ```text
 central.ap.radios.discovery
 central.ap.radio.raw[<tenant-id>,<serial>,<radio-number>]
 ```
 
-Switch:
+Switches:
 
 ```text
 central.switches.discovery
@@ -253,16 +245,16 @@ central.switch.interfaces.discovery
 central.switch.interface.raw[<tenant-id>,<serial>,<port-index>]
 ```
 
-Licenze GreenLake:
+GreenLake subscriptions:
 
 ```text
 central.licenses.discovery
-central.license.raw[<tenant-id>,<subscription-id>]
+central.license.raw[<scope>,<owner-id>,<subscription-id>]
 ```
 
-Le subscription vengono lette da GreenLake Subscription Management, non dalle API `network-monitoring`. Il collector usa `GET /subscriptions/v1/subscriptions` per ogni tenant/workspace e invia a Zabbix quantita' totale, quantita' disponibile, stato, tier e giorni alla scadenza. Vengono monitorate solo le subscription attive (`STARTED`/`ACTIVE`), cosi' le vecchie evaluation gia' terminate non generano rumore. La subscription key completa non viene inviata a Zabbix: viene usato l'ID subscription e solo il suffisso della key per riconoscimento umano.
+The collector monitors only non-evaluation active subscription keys (`isEval=false` and status `STARTED`/`ACTIVE`). This avoids noise from expired evaluation subscriptions. The full subscription key is not sent to Zabbix; the subscription ID is used in item keys and only the key suffix is exposed for human recognition.
 
-Il collector health include:
+`collector.health` includes:
 
 - `workspace_count`
 - `tenants_count`
@@ -275,29 +267,25 @@ Il collector health include:
 - `sent_lines`
 - `elapsed_seconds`
 
-## Streaming API
+## Streaming APIs
 
-Le Streaming API di New Central possono essere utili, ma sono un flusso diverso dal polling REST usato da questo collector. Central espone WebSocket `wss://<central-base-url>/network-services/v1alpha1/<endpoint-path>`, autenticati con lo stesso bearer token OAuth delle REST API. Gli eventi arrivano come CloudEvents codificati in protobuf, quindi bisogna decodificare prima l'envelope CloudEvent e poi il payload specifico dell'evento.
+New Central Streaming APIs can be useful, but they are a different flow from the REST polling used by this collector. Central exposes WebSocket endpoints such as `wss://<central-base-url>/network-services/v1alpha1/<endpoint-path>`, authenticated with the same OAuth bearer token used by REST APIs. Events are CloudEvents encoded with protobuf, so a streaming consumer must decode both the CloudEvent envelope and the event-specific payload.
 
-Nota: le Streaming API sono disponibili solo per device con Central Advanced tier.
+Streaming is best implemented as a second daemon, not inside `push-all`:
 
-Usi sensati per una versione futura:
+- receive AP monitoring events in near real time;
+- consume audit trail or configuration events;
+- convert selected events to Zabbix trapper items or event-style problems;
+- keep REST polling as the periodic inventory and metric baseline.
 
-- ricevere eventi AP monitoring quasi real time;
-- ricevere audit trail e cambi di configurazione;
-- trasformare eventi specifici in trapper item o in problem event Zabbix;
-- mantenere il polling REST come baseline periodica, usando lo streaming solo per eventi immediati.
+New Central Streaming APIs require devices with Central Advanced tier.
 
-Non lo mischierei nel processo `push-all`: meglio un secondo comando/daemon dedicato, con reconnect automatico e refresh token, per esempio `central_collector.py stream --event ap-monitoring`.
+## Security Notes
 
-## Note di sicurezza
+The collector stores temporary access tokens in `.token_cache.json`. Protect the collector directory.
 
-Il collector salva token temporanei in `.token_cache.json`. Il file contiene access token validi circa 15 minuti: proteggi la directory del collector.
-
-Non pubblicare mai:
+Never commit:
 
 - `workspaces.json`
 - `.token_cache.json`
 - `zabbix_sender.exe`
-
-Gli alert Central verranno gestiti solo con New Central API/webhook, non con endpoint Classic Central.

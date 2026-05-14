@@ -20,7 +20,7 @@ zabbix_export:
           value: '30'
           description: 'Raise a warning when a subscription expires within this number of days.'
         - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-          value: 0.3.0 # TEMPLATE_VERSION
+          value: 0.4.0 # TEMPLATE_VERSION
           description: 'Version of this Zabbix template package.'
       items:
         - uuid: 73ddacbc76ef4db486d466d5a6acaa42
@@ -273,9 +273,9 @@ zabbix_export:
           description: 'Receives GreenLake subscription low-level discovery JSON from the external collector.'
           item_prototypes:
             - uuid: a7a1242b27a9475e90259b837b41e14e
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: data'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: data'
               type: TRAP
-              key: 'central.license.raw[{#TENANT_ID},{#LICENSE_ID}]'
+              key: 'central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               history: '0'
               trends: '0'
               value_type: TEXT
@@ -290,17 +290,21 @@ zabbix_export:
                   value: '{#DEVICE_TYPE_TAG}'
                 - tag: license_type
                   value: '{#LICENSE_TYPE}'
+                - tag: license_scope
+                  value: '{#LICENSE_SCOPE}'
+                - tag: owner
+                  value: '{#LICENSE_OWNER_NAME}'
             - uuid: b9d0c3b21fb44f05813baa0ad5245ea8
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: available quantity'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: available quantity'
               type: DEPENDENT
-              key: 'central.license.available[{#TENANT_ID},{#LICENSE_ID}]'
+              key: 'central.license.available[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               value_type: UNSIGNED
               preprocessing:
                 - type: JSONPATH
                   parameters:
                     - $.available_quantity
               master_item:
-                key: 'central.license.raw[{#TENANT_ID},{#LICENSE_ID}]'
+                key: 'central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               tags:
                 - tag: component
                   value: license
@@ -312,17 +316,21 @@ zabbix_export:
                   value: '{#DEVICE_TYPE_TAG}'
                 - tag: license_type
                   value: '{#LICENSE_TYPE}'
+                - tag: license_scope
+                  value: '{#LICENSE_SCOPE}'
+                - tag: owner
+                  value: '{#LICENSE_OWNER_NAME}'
             - uuid: 5dfbd9092c05496da5a97c3134eda6e2
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: total quantity'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: total quantity'
               type: DEPENDENT
-              key: 'central.license.quantity[{#TENANT_ID},{#LICENSE_ID}]'
+              key: 'central.license.quantity[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               value_type: UNSIGNED
               preprocessing:
                 - type: JSONPATH
                   parameters:
                     - $.quantity
               master_item:
-                key: 'central.license.raw[{#TENANT_ID},{#LICENSE_ID}]'
+                key: 'central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               tags:
                 - tag: component
                   value: license
@@ -334,10 +342,14 @@ zabbix_export:
                   value: '{#DEVICE_TYPE_TAG}'
                 - tag: license_type
                   value: '{#LICENSE_TYPE}'
+                - tag: license_scope
+                  value: '{#LICENSE_SCOPE}'
+                - tag: owner
+                  value: '{#LICENSE_OWNER_NAME}'
             - uuid: 58ade432bd824491ad6f0aaa245353fc
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: days until expiry'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: days until expiry'
               type: DEPENDENT
-              key: 'central.license.days_until_expiry[{#TENANT_ID},{#LICENSE_ID}]'
+              key: 'central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               value_type: FLOAT
               units: d
               preprocessing:
@@ -345,7 +357,7 @@ zabbix_export:
                   parameters:
                     - $.days_until_expiry
               master_item:
-                key: 'central.license.raw[{#TENANT_ID},{#LICENSE_ID}]'
+                key: 'central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               tags:
                 - tag: component
                   value: license
@@ -357,17 +369,21 @@ zabbix_export:
                   value: '{#DEVICE_TYPE_TAG}'
                 - tag: license_type
                   value: '{#LICENSE_TYPE}'
+                - tag: license_scope
+                  value: '{#LICENSE_SCOPE}'
+                - tag: owner
+                  value: '{#LICENSE_OWNER_NAME}'
             - uuid: b9822db41fcb4d86bba51d103f9155de
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: status'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: status'
               type: DEPENDENT
-              key: 'central.license.status[{#TENANT_ID},{#LICENSE_ID}]'
+              key: 'central.license.status[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               value_type: CHAR
               preprocessing:
                 - type: JSONPATH
                   parameters:
                     - $.subscription_status
               master_item:
-                key: 'central.license.raw[{#TENANT_ID},{#LICENSE_ID}]'
+                key: 'central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               tags:
                 - tag: component
                   value: license
@@ -379,17 +395,21 @@ zabbix_export:
                   value: '{#DEVICE_TYPE_TAG}'
                 - tag: license_type
                   value: '{#LICENSE_TYPE}'
+                - tag: license_scope
+                  value: '{#LICENSE_SCOPE}'
+                - tag: owner
+                  value: '{#LICENSE_OWNER_NAME}'
             - uuid: 3726049933404694971bce617458ea4c
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: tier'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: tier'
               type: DEPENDENT
-              key: 'central.license.tier[{#TENANT_ID},{#LICENSE_ID}]'
+              key: 'central.license.tier[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               value_type: CHAR
               preprocessing:
                 - type: JSONPATH
                   parameters:
                     - $.tier
               master_item:
-                key: 'central.license.raw[{#TENANT_ID},{#LICENSE_ID}]'
+                key: 'central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]'
               tags:
                 - tag: component
                   value: license
@@ -401,17 +421,21 @@ zabbix_export:
                   value: '{#DEVICE_TYPE_TAG}'
                 - tag: license_type
                   value: '{#LICENSE_TYPE}'
+                - tag: license_scope
+                  value: '{#LICENSE_SCOPE}'
+                - tag: owner
+                  value: '{#LICENSE_OWNER_NAME}'
           trigger_prototypes:
             - uuid: f6cd586b6bd14321a22c2da8fbb0bd3c
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.license.days_until_expiry[{#TENANT_ID},{#LICENSE_ID}])<0'
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: expired'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<0'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: expired'
               priority: HIGH
               tags:
                 - tag: scope
                   value: license
             - uuid: cf178b3590e1414697cd40723598102e
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.license.days_until_expiry[{#TENANT_ID},{#LICENSE_ID}])>=0 and last(/HPE Aruba Central New AP by trapper/central.license.days_until_expiry[{#TENANT_ID},{#LICENSE_ID}])<={$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}'
-              name: 'License {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: expires within {$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS} days'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])>=0 and last(/HPE Aruba Central New AP by trapper/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<={$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}'
+              name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}: expires within {$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS} days'
               priority: WARNING
               tags:
                 - tag: scope
@@ -694,7 +718,7 @@ zabbix_export:
                 - tag: scope
                   value: performance
             - uuid: 3d24fb0f011a47d4bcb3a20c99093e4f
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"UP"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"UP"'
               name: 'AP {#DEVICE_NAME}: eth0 is not up'
               priority: AVERAGE
               tags:
@@ -842,21 +866,21 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: b618db3c54ce413e8013fbd76d342123
-              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
               name: 'AP {#DEVICE_NAME}: radio {#RADIO_BAND} is not up'
               priority: AVERAGE
               tags:
                 - tag: scope
                   value: availability
             - uuid: a01bfe290a7748c8b7fe5144671e080d
-              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} channel utilization'
               priority: WARNING
               tags:
                 - tag: scope
                   value: performance
             - uuid: 15e70420bc114b59ae6f52f8893f86d2
-              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} noise floor'
               priority: WARNING
               tags:

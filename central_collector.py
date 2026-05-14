@@ -16,8 +16,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "0.3.0"
-TEMPLATE_VERSION = "0.3.0"
+COLLECTOR_VERSION = "0.4.0"
+TEMPLATE_VERSION = "0.4.0"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -703,10 +703,28 @@ def get_subscriptions_for_tenant(msp_token: str, tenant: dict[str, Any]) -> list
         token = tenant_token(msp_token, tenant, force_refresh=True)
         subscriptions = get_greenlake_all_pages(token, "/subscriptions/v1/subscriptions")
     for subscription in subscriptions:
+        subscription["_license_scope"] = "tenant"
+        subscription["_owner_id"] = tenant_id
+        subscription["_owner_name"] = tenant_name(tenant)
         subscription["_tenant_id"] = tenant_id
         subscription["_tenant_name"] = tenant_name(tenant)
         subscription["_workspace_id"] = tenant.get("_workspace_id")
         subscription["_workspace_name"] = tenant.get("_workspace_name")
+    return subscriptions
+
+
+def get_subscriptions_for_workspace(workspace_token: str, workspace: dict[str, Any]) -> list[dict[str, Any]]:
+    subscriptions = get_greenlake_all_pages(workspace_token, "/subscriptions/v1/subscriptions")
+    workspace_id = str(workspace.get("workspace_id") or "")
+    workspace_name = str(workspace.get("name") or workspace_id)
+    for subscription in subscriptions:
+        subscription["_license_scope"] = "workspace"
+        subscription["_owner_id"] = workspace_id
+        subscription["_owner_name"] = workspace_name
+        subscription["_tenant_id"] = workspace_id if workspace.get("mode") == "standalone" else ""
+        subscription["_tenant_name"] = workspace_name if workspace.get("mode") == "standalone" else ""
+        subscription["_workspace_id"] = workspace_id
+        subscription["_workspace_name"] = workspace_name
     return subscriptions
 
 
@@ -873,6 +891,9 @@ def normalize_subscription(subscription: dict[str, Any]) -> dict[str, Any]:
     end_time = subscription.get("endTime")
     expiry_days = days_until(end_time)
     return {
+        "license_scope": subscription.get("_license_scope"),
+        "owner_id": subscription.get("_owner_id"),
+        "owner_name": subscription.get("_owner_name"),
         "workspace_id": subscription.get("_workspace_id"),
         "workspace_name": subscription.get("_workspace_name"),
         "tenant_id": subscription.get("_tenant_id"),
@@ -898,7 +919,7 @@ def normalize_subscription(subscription: dict[str, Any]) -> dict[str, Any]:
 
 def is_monitorable_subscription(subscription: dict[str, Any]) -> bool:
     status = str(subscription.get("subscription_status") or "").upper()
-    return status in ("STARTED", "ACTIVE")
+    return status in ("STARTED", "ACTIVE") and subscription.get("is_eval") is False
 
 
 def normalize_radios(radios: Any) -> list[dict[str, Any]]:
@@ -1091,10 +1112,22 @@ def build_switch_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zab
     return lines
 
 
-def build_license_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
+def build_license_sender_lines(
+    msp_token: str,
+    workspace: dict[str, Any],
+    tenants: list[dict[str, Any]],
+    zabbix_host: str,
+) -> list[str]:
     subscriptions: list[dict[str, Any]] = []
     lines: list[str] = []
+    subscriptions.extend(
+        subscription
+        for subscription in (normalize_subscription(item) for item in get_subscriptions_for_workspace(msp_token, workspace))
+        if is_monitorable_subscription(subscription)
+    )
     for tenant in tenants:
+        if workspace.get("mode") == "standalone":
+            continue
         subscriptions.extend(
             subscription
             for subscription in (normalize_subscription(item) for item in get_subscriptions_for_tenant(msp_token, tenant))
@@ -1103,19 +1136,25 @@ def build_license_sender_lines(msp_token: str, tenants: list[dict[str, Any]], za
 
     lines.append(sender_line(zabbix_host, "central.licenses.discovery", licenses_lld(subscriptions)))
     for subscription in subscriptions:
-        tenant_id = str(subscription.get("tenant_id") or "")
+        license_scope = str(subscription.get("license_scope") or "")
+        owner_id = str(subscription.get("owner_id") or "")
         subscription_id = str(subscription.get("id") or "")
-        if not tenant_id or not subscription_id:
+        if not license_scope or not owner_id or not subscription_id:
             continue
-        lines.append(sender_line(zabbix_host, f"central.license.raw[{tenant_id},{subscription_id}]", subscription))
+        lines.append(sender_line(zabbix_host, f"central.license.raw[{license_scope},{owner_id},{subscription_id}]", subscription))
     return lines
 
 
-def build_all_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_host: str) -> list[str]:
+def build_all_sender_lines(
+    msp_token: str,
+    tenants: list[dict[str, Any]],
+    zabbix_host: str,
+    workspace: dict[str, Any] | None = None,
+) -> list[str]:
     started = time.time()
     ap_lines = build_ap_sender_lines(msp_token, tenants, zabbix_host)
     switch_lines = build_switch_sender_lines(msp_token, tenants, zabbix_host)
-    license_lines = build_license_sender_lines(msp_token, tenants, zabbix_host)
+    license_lines = build_license_sender_lines(msp_token, workspace or {}, tenants, zabbix_host)
     inventory = collect_device_inventory_summary(msp_token, tenants)
     health = {
         "status": "ok",
@@ -1170,7 +1209,7 @@ def collect_all_config_payload(config: dict[str, Any] | None) -> tuple[dict[str,
             msp_token = get_msp_token()
             tenants = get_workspace_tenants(msp_token, workspace)
             tenant_count += len(tenants)
-            workspace_lines = build_all_sender_lines(msp_token, tenants, zabbix_host)
+            workspace_lines = build_all_sender_lines(msp_token, tenants, zabbix_host, workspace)
             for line in workspace_lines:
                 _host, key, value = parse_sender_line(line)
                 if key == "central.collector.health":
@@ -1327,7 +1366,7 @@ def run_daemon(command: str, interval_seconds: int) -> None:
                 elif command == "push-switches":
                     lines = build_switch_sender_lines(msp_token, tenants, zabbix_host)
                 elif command == "push-all":
-                    lines = build_all_sender_lines(msp_token, tenants, zabbix_host)
+                    lines = build_all_sender_lines(msp_token, tenants, zabbix_host, workspaces[0])
                 else:
                     raise CentralError(f"Unsupported daemon command: {command}")
             result = run_zabbix_sender(lines)
@@ -1482,6 +1521,9 @@ def licenses_lld(subscriptions: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#TENANT_ID}": subscription.get("tenant_id"),
                 "{#TENANT_NAME}": subscription.get("tenant_name"),
                 "{#WORKSPACE_NAME}": subscription.get("workspace_name") or subscription.get("tenant_name"),
+                "{#LICENSE_SCOPE}": subscription.get("license_scope"),
+                "{#LICENSE_OWNER_ID}": subscription.get("owner_id"),
+                "{#LICENSE_OWNER_NAME}": subscription.get("owner_name"),
                 "{#DEVICE_TYPE_TAG}": license_device_type_tag(subscription.get("subscription_type")),
                 "{#LICENSE_ID}": subscription.get("id"),
                 "{#LICENSE_TYPE}": subscription.get("subscription_type"),
@@ -1490,7 +1532,7 @@ def licenses_lld(subscriptions: list[dict[str, Any]]) -> dict[str, Any]:
                 "{#LICENSE_KEY_SUFFIX}": subscription.get("key_suffix"),
             }
             for subscription in subscriptions
-            if subscription.get("tenant_id") and subscription.get("id")
+            if subscription.get("license_scope") and subscription.get("owner_id") and subscription.get("id")
         ]
     }
 
