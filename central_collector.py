@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-COLLECTOR_VERSION = "1.0.2"
-TEMPLATE_VERSION = "1.0.2"
-CONFIG_SCHEMA_VERSION = "1.0.2"
+COLLECTOR_VERSION = "1.0.3"
+TEMPLATE_VERSION = "1.0.3"
+CONFIG_SCHEMA_VERSION = "1.0.3"
 GITHUB_CONTENTS_BASE_URL = "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents"
 GITHUB_REF = "main"
 VERSION_CHECK_TIMEOUT_SECONDS = 5
@@ -47,6 +48,7 @@ RECOMMENDED_CONFIG_PATHS = (
     "collector.interval_seconds",
     "collector.collect_client_counts",
     "collector.auto_import_template",
+    "collector.api_workers",
     "collector.version_check_enabled",
     "collector.version_check_base_url",
     "collector.version_check_ref",
@@ -120,6 +122,8 @@ def apply_zabbix_config(config: dict[str, Any] | None) -> None:
             os.environ["HPE_COLLECT_CLIENT_COUNTS"] = "true" if collector["collect_client_counts"] else "false"
         if collector.get("auto_import_template") is not None:
             os.environ["CENTRAL_AUTO_IMPORT_TEMPLATE"] = "true" if collector["auto_import_template"] else "false"
+        if collector.get("api_workers") is not None:
+            os.environ["CENTRAL_API_WORKERS"] = str(collector["api_workers"])
         if collector.get("lld_settle_seconds") is not None:
             os.environ["CENTRAL_LLD_SETTLE_SECONDS"] = str(collector["lld_settle_seconds"])
         if collector.get("version_check_enabled") is not None:
@@ -214,6 +218,18 @@ def env_bool(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def env_int(name: str, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        value = int(env(name, required=False, default=str(default)))
+    except ValueError:
+        value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
 
 
 def parse_version(value: str) -> tuple[int, ...]:
@@ -378,16 +394,28 @@ def request_json(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    req = Request(url, data=data, headers=headers, method=method)
-    try:
-        with urlopen(req, timeout=60) as response:
-            body = response.read().decode("utf-8")
-            return json.loads(body) if body else {}
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise CentralError(f"HTTP {exc.code} calling {url}: {body}") from exc
-    except URLError as exc:
-        raise CentralError(f"Network error calling {url}: {exc.reason}") from exc
+    retry_attempts = env_int("CENTRAL_API_RETRY_ATTEMPTS", 3, minimum=1, maximum=8)
+    for attempt in range(1, retry_attempts + 1):
+        req = Request(url, data=data, headers=headers, method=method)
+        try:
+            with urlopen(req, timeout=60) as response:
+                body = response.read().decode("utf-8")
+                return json.loads(body) if body else {}
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 429 and attempt < retry_attempts:
+                retry_after = exc.headers.get("Retry-After")
+                try:
+                    delay = float(retry_after) if retry_after else 0.0
+                except (TypeError, ValueError):
+                    delay = 0.0
+                time.sleep(max(delay, min(2 ** attempt, 10)))
+                continue
+            raise CentralError(f"HTTP {exc.code} calling {url}: {body}") from exc
+        except URLError as exc:
+            raise CentralError(f"Network error calling {url}: {exc.reason}") from exc
+
+    raise CentralError(f"Unable to call {url}")
 
 
 def zabbix_api_call(method: str, params: dict[str, Any] | list[Any] | None = None) -> Any:
@@ -804,15 +832,19 @@ def get_devices_for_tenant(
 
 def get_ap_detail_for_tenant(msp_token: str, tenant: dict[str, Any], serial: str, site_id: str | None = None) -> dict[str, Any]:
     tenant_id = str(tenant.get("id") or "")
-    query = {"site-id": site_id} if site_id else None
     token = tenant_token(msp_token, tenant)
     try:
-        detail = central_get(token, f"/network-monitoring/v1/aps/{serial}", query)
+        return get_ap_detail_with_token(token, tenant_id, serial, site_id)
     except CentralError as exc:
         if "HTTP 401" not in str(exc):
             raise
         token = tenant_token(msp_token, tenant, force_refresh=True)
-        detail = central_get(token, f"/network-monitoring/v1/aps/{serial}", query)
+        return get_ap_detail_with_token(token, tenant_id, serial, site_id)
+
+
+def get_ap_detail_with_token(token: str, tenant_id: str, serial: str, site_id: str | None = None) -> dict[str, Any]:
+    query = {"site-id": site_id} if site_id else None
+    detail = central_get(token, f"/network-monitoring/v1/aps/{serial}", query)
     detail["_tenant_id"] = tenant_id
     if env_bool("HPE_COLLECT_CLIENT_COUNTS", default=True):
         detail["_clients_connected"] = get_connected_clients_count(token, serial, site_id)
@@ -1512,6 +1544,7 @@ def build_ap_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_
     started = time.time()
     aps: list[dict[str, Any]] = []
     tenant_by_id = {str(tenant.get("id") or ""): tenant for tenant in tenants}
+    token_by_tenant_id = {tenant_id: tenant_token(msp_token, tenant) for tenant_id, tenant in tenant_by_id.items() if tenant_id}
     radios: list[dict[str, Any]] = []
     lines: list[str] = []
     for tenant in tenants:
@@ -1519,13 +1552,42 @@ def build_ap_sender_lines(msp_token: str, tenants: list[dict[str, Any]], zabbix_
 
     lines.append(sender_line(zabbix_host, "central.aps.discovery", devices_lld(aps)))
 
-    for ap in aps:
+    def fetch_ap_detail(ap: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         tenant_id = str(ap.get("tenant_id") or "")
         serial = str(ap.get("serial") or "")
         site_id = str(ap.get("site_id") or "")
         if not tenant_id or not serial:
+            return ap, {}
+        token = token_by_tenant_id.get(tenant_id)
+        if not token:
+            return ap, {}
+        try:
+            detail = get_ap_detail_with_token(token, tenant_id, serial, site_id or None)
+        except CentralError as exc:
+            if "HTTP 401" not in str(exc):
+                raise
+            token = tenant_token(msp_token, tenant_by_id[tenant_id], force_refresh=True)
+            token_by_tenant_id[tenant_id] = token
+            detail = get_ap_detail_with_token(token, tenant_id, serial, site_id or None)
+        return ap, normalize_ap_detail(detail)
+
+    workers = min(env_int("CENTRAL_API_WORKERS", 4, minimum=1, maximum=32), max(1, len(aps)))
+    if workers <= 1 or len(aps) <= 1:
+        detail_results = [fetch_ap_detail(ap) for ap in aps]
+    else:
+        detail_results = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(fetch_ap_detail, ap) for ap in aps]
+            for future in as_completed(futures):
+                detail_results.append(future.result())
+
+    detail_results.sort(key=lambda item: (str(item[0].get("tenant_id") or ""), str(item[0].get("serial") or "")))
+    for ap, detail in detail_results:
+        if not detail:
             continue
-        detail = normalize_ap_detail(get_ap_detail_for_tenant(msp_token, tenant_by_id[tenant_id], serial, site_id or None))
+        tenant_id = str(ap.get("tenant_id") or "")
+        serial = str(ap.get("serial") or "")
+        site_id = str(ap.get("site_id") or "")
         detail["workspace_name"] = ap.get("workspace_name")
         detail["workspace_id"] = ap.get("workspace_id")
         lines.append(sender_line(zabbix_host, f"central.ap.raw[{tenant_id},{serial}]", detail))
@@ -1704,14 +1766,14 @@ def build_all_sender_lines(
     ]
 
 
-def build_all_config_sender_lines(config: dict[str, Any] | None) -> list[str]:
+def build_all_config_sender_lines(config: dict[str, Any] | None, plans: list[dict[str, Any]] | None = None) -> list[str]:
     health, all_lines = collect_all_config_payload(config)
     collector_host = apply_global_host_prefix(collector_host_name())
     try:
-        plans = collect_host_plans(config or {})
-        health["zabbix_managed_hosts_status"] = collect_zabbix_managed_hosts_status(config or {}, plans)
+        active_plans = plans or collect_host_plans(config or {})
+        health["zabbix_managed_hosts_status"] = collect_zabbix_managed_hosts_status(config or {}, active_plans)
         lines = [sender_line(collector_host, "central.collector.health", health)] + all_lines
-        return retarget_sender_lines(lines, host_lookup_from_plans(plans), collector_host)
+        return retarget_sender_lines(lines, host_lookup_from_plans(active_plans), collector_host)
     except Exception as exc:
         health["host_retargeting_status"] = {"status": "error", "error": str(exc)}
         return [sender_line(collector_host, "central.collector.health", health)] + all_lines
@@ -1955,6 +2017,11 @@ def summarize_host_sync(result: dict[str, Any]) -> dict[str, Any]:
         "reason": result.get("reason"),
         "template": result.get("template"),
     }
+
+
+def extract_sync_plans(result: dict[str, Any]) -> list[dict[str, Any]] | None:
+    plans = result.get("plans")
+    return plans if isinstance(plans, list) else None
 
 
 def zabbix_get_or_create_hostgroup(name: str, apply: bool = False) -> dict[str, Any]:
@@ -2261,8 +2328,8 @@ def collect_host_plans(config: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(plans.values(), key=lambda item: (str(item.get("host_group")), str(item.get("host"))))
 
 
-def sync_zabbix_hosts(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
-    plans = collect_host_plans(config)
+def sync_zabbix_hosts(config: dict[str, Any], apply: bool = False, plans: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    plans = plans or collect_host_plans(config)
     if not apply:
         return {
             "apply": False,
@@ -2286,7 +2353,8 @@ def sync_zabbix_hosts_if_configured(config: dict[str, Any]) -> dict[str, Any]:
     if not env("ZABBIX_API_URL", required=False, default="") or not env("ZABBIX_API_TOKEN", required=False, default=""):
         return {"status": "skipped", "reason": "missing Zabbix API configuration"}
     template_result = auto_import_zabbix_template_if_needed(config)
-    result = sync_zabbix_hosts(config, apply=True)
+    plans = collect_host_plans(config)
+    result = sync_zabbix_hosts(config, apply=True, plans=plans)
     result["status"] = "ok"
     result["template"] = {
         "status": template_result.get("status"),
@@ -2296,6 +2364,7 @@ def sync_zabbix_hosts_if_configured(config: dict[str, Any]) -> dict[str, Any]:
         "expected": template_result.get("expected"),
         "reason": template_result.get("reason"),
     }
+    result["plans"] = plans
     return result
 
 
@@ -2370,7 +2439,7 @@ def run_daemon(command: str, interval_seconds: int) -> None:
             config = load_json_config()
             if command == "push-all":
                 sync_result = sync_zabbix_hosts_if_configured(config)
-                lines = build_all_config_sender_lines(config)
+                lines = build_all_config_sender_lines(config, extract_sync_plans(sync_result))
             else:
                 apply_zabbix_config(config)
                 workspaces = config_workspaces(config)
@@ -2768,9 +2837,10 @@ def main() -> int:
         return 0
 
     if args.command == "push-all":
+        sync_result: dict[str, Any] | None = None
         if not args.dry_run:
-            sync_zabbix_hosts_if_configured(config)
-        lines = build_all_config_sender_lines(config)
+            sync_result = sync_zabbix_hosts_if_configured(config)
+        lines = build_all_config_sender_lines(config, extract_sync_plans(sync_result or {}))
         if args.dry_run:
             print("\n".join(lines))
         else:
