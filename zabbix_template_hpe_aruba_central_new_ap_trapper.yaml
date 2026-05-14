@@ -19,11 +19,8 @@ zabbix_export:
         - macro: '{$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}'
           value: '30'
           description: 'Raise a warning when a subscription expires within this number of days.'
-        - macro: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}'
-          value: '0'
-          description: 'Set to 1 to enable trigger prototypes generated from collected device metric items. Default 0 uses Central API alerts as the primary alert source.'
         - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-          value: 0.5.1 # TEMPLATE_VERSION
+          value: 0.5.2 # TEMPLATE_VERSION
           description: 'Version of this Zabbix template package.'
       items:
         - uuid: 73ddacbc76ef4db486d466d5a6acaa42
@@ -940,30 +937,34 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: 82f6767982604bccbf0404400679169c
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"ONLINE"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"ONLINE"'
               name: 'AP {#DEVICE_NAME}: not online'
               priority: HIGH
+              status: DISABLED
               tags:
                 - tag: scope
                   value: availability
             - uuid: 6b7dd05d7f574b6ebc84382e9e5a6f4c
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and min(/HPE Aruba Central New AP by trapper/central.ap.cpu[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
+              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.cpu[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
               name: 'AP {#DEVICE_NAME}: high CPU utilization'
               priority: WARNING
+              status: DISABLED
               tags:
                 - tag: scope
                   value: performance
             - uuid: a2614f7f18e94d4890a0157b01862420
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and min(/HPE Aruba Central New AP by trapper/central.ap.memory[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
+              expression: 'min(/HPE Aruba Central New AP by trapper/central.ap.memory[{#TENANT_ID},{#DEVICE_SERIAL}],15m)>85'
               name: 'AP {#DEVICE_NAME}: high memory utilization'
               priority: WARNING
+              status: DISABLED
               tags:
                 - tag: scope
                   value: performance
             - uuid: 3d24fb0f011a47d4bcb3a20c99093e4f
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"UP"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.status[{#TENANT_ID},{#DEVICE_SERIAL}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.eth0.status[{#TENANT_ID},{#DEVICE_SERIAL}])<>"UP"'
               name: 'AP {#DEVICE_NAME}: eth0 is not up'
               priority: AVERAGE
+              status: DISABLED
               tags:
                 - tag: scope
                   value: availability
@@ -1131,23 +1132,26 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: b618db3c54ce413e8013fbd76d342123
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and last(/HPE Aruba Central New AP by trapper/central.ap.radio.status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])<>"UP"'
               name: 'AP {#DEVICE_NAME}: radio {#RADIO_BAND} is not up'
               priority: AVERAGE
+              status: DISABLED
               tags:
                 - tag: scope
                   value: availability
             - uuid: a01bfe290a7748c8b7fe5144671e080d
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.channel_utilization[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>80'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} channel utilization'
               priority: WARNING
+              status: DISABLED
               tags:
                 - tag: scope
                   value: performance
             - uuid: 15e70420bc114b59ae6f52f8893f86d2
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.ap.radio.ap_status[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}])="ONLINE" and min(/HPE Aruba Central New AP by trapper/central.ap.radio.noise_floor[{#TENANT_ID},{#DEVICE_SERIAL},{#RADIO_NUMBER}],15m)>-85'
               name: 'AP {#DEVICE_NAME}: high radio {#RADIO_BAND} noise floor'
               priority: WARNING
+              status: DISABLED
               tags:
                 - tag: scope
                   value: performance
@@ -1292,16 +1296,18 @@ zabbix_export:
                   value: '{#SITE_NAME}'
           trigger_prototypes:
             - uuid: 053408082e9240e0be33f06030e14cb1
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.switch.status[{#TENANT_ID},{#SWITCH_SERIAL}])<>"ONLINE"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.switch.status[{#TENANT_ID},{#SWITCH_SERIAL}])<>"ONLINE"'
               name: 'Switch {#SWITCH_NAME}: not online'
               priority: HIGH
+              status: DISABLED
               tags:
                 - tag: scope
                   value: availability
             - uuid: a03d903a0b7b4f0eac6614f2a1d9f76a
-              expression: '{$CENTRAL.ITEM.TRIGGERS.ENABLED}=1 and last(/HPE Aruba Central New AP by trapper/central.switch.health[{#TENANT_ID},{#SWITCH_SERIAL}])<>"Good"'
+              expression: 'last(/HPE Aruba Central New AP by trapper/central.switch.health[{#TENANT_ID},{#SWITCH_SERIAL}])<>"Good"'
               name: 'Switch {#SWITCH_NAME}: health is not good'
               priority: AVERAGE
+              status: DISABLED
               tags:
                 - tag: scope
                   value: health

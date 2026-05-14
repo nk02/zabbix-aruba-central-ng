@@ -66,7 +66,6 @@ Template macros:
 
 ```text
 {$CENTRAL.COLLECTOR.NODATA}                 default 15m
-{$CENTRAL.ITEM.TRIGGERS.ENABLED}            default 0
 {$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}      default 30
 {$CENTRAL.TEMPLATE.VERSION}                 package version
 ```
@@ -74,8 +73,8 @@ Template macros:
 Alerting modes:
 
 - Default mode uses Central alerts from `GET /network-notifications/v1/alerts`. The collector sends `central.alerts.summary`, alert discovery, and raw active alert items. The template raises a Zabbix problem when active Central alerts are present.
-- Item-derived mode uses trigger prototypes generated from collected AP, radio, and switch metric items. To enable it, set `alert_mode` to `items` or `both` in `workspaces.json` and set Zabbix macro `{$CENTRAL.ITEM.TRIGGERS.ENABLED}` to `1`.
-- `both` collects Central alerts and enables you to use item-derived triggers at the same time. Keep the macro at `0` if you want Central alerts only.
+- Item-derived trigger prototypes for AP, radio, and switch metrics are included in the same template but imported disabled by default. Enable them in Zabbix only if you want Zabbix to generate problems from collected metric items.
+- `both` collects Central alerts and lets you also enable item-derived trigger prototypes in Zabbix.
 
 Discovered items include these tags:
 
@@ -160,9 +159,9 @@ Modes:
 `alert_mode` controls how alert data is collected:
 
 - `central` (default): collect active alerts from Central APIs.
-- `items`: skip Central alert polling; use Zabbix trigger prototypes from collected items if the template macro enables them.
+- `items`: skip Central alert polling; use Zabbix trigger prototypes from collected items if you enable them in the template.
 - `both`: collect Central alerts and allow item-derived trigger prototypes.
-- `none`: do not collect Central alerts and keep item-derived triggers disabled unless you override the template macro.
+- `none`: do not collect Central alerts. Item-derived trigger prototypes remain disabled unless you enable them in Zabbix.
 
 `version_check_enabled` adds collector and template version status to `collector.health`. The collector checks GitHub Contents API and raises update alerts only when a newer version exists.
 
