@@ -1,1073 +1,42 @@
 zabbix_export:
   version: '7.0'
   template_groups:
-  - uuid: 16c613b93ff24082accf39ed4d3673a9
+  - uuid: c8bb804cfbbd4128975e12db65aa0687
     name: Templates/Network devices
   templates:
-  - uuid: 1849edd5b861448985393b6038f242dd
-    template: HPE Aruba Central NG - Collector
-    name: HPE Aruba Central NG - Collector
-    description: Collector health, config, version, and subscription items for the
-      external HPE Aruba Central collector.
+  - uuid: 377ff8cffa794233ba75c18b6aa8c9a3
+    template: HPE Aruba Central NG - Gateway
+    name: HPE Aruba Central NG - Gateway
+    description: Health checks for the HPE Aruba Central NG gateway/cache service.
     groups:
     - name: Templates/Network devices
     macros:
-    - macro: '{$CENTRAL.COLLECTOR.NODATA}'
-      value: 10m
-      description: Time without collector health updates before raising an alert.
-    - macro: '{$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}'
-      value: '30'
-      description: Raise a warning when a subscription expires within this number
-        of days.
+    - macro: '{$CENTRAL.GATEWAY.URL}'
+      value: http://127.0.0.1:8080
+      description: Base URL of the local Central gateway/cache service.
+    - macro: '{$CENTRAL.GATEWAY.POLL_INTERVAL}'
+      value: 1m
+      description: Gateway health polling interval.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 1.0.3
-      description: Version of this Zabbix template package.
+      value: 2.0.0-dev4
+      description: Version of this template package.
     items:
-    - uuid: 4e57de4d770d43a2bbc53933328a8b43
-      name: Collector health
-      type: TRAP
-      key: central.collector.health
-      history: 7d
-      trends: '0'
-      value_type: TEXT
-      tags:
-      - tag: component
-        value: collector
-      triggers:
-      - uuid: ed813e080d974425b5f2c7dc27e2bfda
-        expression: nodata(/HPE Aruba Central NG - Collector/central.collector.health,{$CENTRAL.COLLECTOR.NODATA})=1
-        name: 'HPE Central collector: no data for {$CENTRAL.COLLECTOR.NODATA}'
-        priority: HIGH
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: 60caa0b646b34336bd8598083475ba36
-      name: Collector status
-      type: DEPENDENT
-      key: central.collector.status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.status
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-      triggers:
-      - uuid: 8a327a9262254ef9b11825b65db28f17
-        expression: last(/HPE Aruba Central NG - Collector/central.collector.status)<>"ok"
-        name: 'HPE Central collector: status is not ok'
-        priority: AVERAGE
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: b63b92d082cb40b993795424b9c9f85d
-      name: Collector workspace count
-      type: DEPENDENT
-      key: central.collector.workspace_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.workspace_count
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-    - uuid: f17e7ff4cd564e63bba2ff70f3f4a030
-      name: Collector tenant count
-      type: DEPENDENT
-      key: central.collector.tenants_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.tenants_count
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-    - uuid: 19cb46a4a3d449978e08462024db200a
-      name: Collector device total
-      type: DEPENDENT
-      key: central.collector.devices_total
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.devices_total
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-    - uuid: b5b87b56a8fd4e23a457517750a647d7
-      name: Collector elapsed time
-      type: DEPENDENT
-      key: central.collector.elapsed_seconds
-      value_type: FLOAT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.elapsed_seconds
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-      units: s
-    - uuid: 8014378906664eadb609fb7ea7db4200
-      name: Collector update status
-      type: DEPENDENT
-      key: central.collector.update_status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.version_status.collector.status
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-      triggers:
-      - uuid: 9351911b11424187844d5ca99c5d4d25
-        expression: last(/HPE Aruba Central NG - Collector/central.collector.update_status)="outdated"
-        name: 'HPE Central collector: newer collector version available on GitHub'
-        priority: INFO
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: 73970ec2837841fd90345d0cbaeb05a8
-      name: Template update status
-      type: DEPENDENT
-      key: central.template.update_status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.version_status.template.status
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-      triggers:
-      - uuid: 18dec9da03f34997b5ee2deeae49de47
-        expression: last(/HPE Aruba Central NG - Collector/central.template.update_status)="outdated"
-        name: 'HPE Central collector: newer Zabbix template version available on GitHub'
-        priority: INFO
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: b65966bf3f5447f596df32c6b0ebfbae
-      name: Collector config status
-      type: DEPENDENT
-      key: central.collector.config_status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.config_status.status
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-      triggers:
-      - uuid: 203afb98b1134679a3c24b241936e053
-        expression: last(/HPE Aruba Central NG - Collector/central.collector.config_status)<>"current"
-        name: 'HPE Central collector: local workspaces.json should be reviewed'
-        priority: INFO
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: e046405d7bd3465cb8b52f8b3153d4dc
-      name: Collector config missing recommended paths
-      type: DEPENDENT
-      key: central.collector.config_missing_recommended_paths
-      value_type: TEXT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.config_status.missing_recommended_paths
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-    - uuid: 450d51da32854d919f4ee75a72e740c4
-      name: Collector unmapped MSP tenant mappings count
-      type: DEPENDENT
-      key: central.collector.unmapped_tenant_mappings_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.unmapped_tenant_mappings_count
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-      triggers:
-      - uuid: 43f07fcec19e47018e2c1452064ce248
-        expression: last(/HPE Aruba Central NG - Collector/central.collector.unmapped_tenant_mappings_count)>0
-        name: 'HPE Central collector: MSP tenants need workspace mapping'
-        priority: INFO
-        tags:
-        - tag: scope
-          value: notice
-    - uuid: c8b75cf24991470885a3fb9811337214
-      name: Collector unmapped MSP tenant mappings
-      type: DEPENDENT
-      key: central.collector.unmapped_tenant_mappings
-      value_type: TEXT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.unmapped_tenant_mappings
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-    - uuid: e229b4f3b2f9450e87dc530f0bcda79a
-      name: Collector stale managed hosts count
-      type: DEPENDENT
-      key: central.collector.stale_managed_hosts_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.zabbix_managed_hosts_status.stale_hosts_count
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-      triggers:
-      - uuid: 234e60f5599c4f6a95a83c8face0b8e1
-        expression: last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_hosts_count)>0
-          and last(/HPE Aruba Central NG - Collector/central.collector.stale_managed_host_names)<>""
-        name: 'HPE Central collector: stale managed hosts: {ITEM.VALUE2}'
-        event_name: 'HPE Central collector: stale managed hosts: {ITEM.VALUE2}'
-        opdata: 'Stale hosts: {ITEM.VALUE2}'
-        priority: WARNING
-        tags:
-        - tag: scope
-          value: notice
-    - uuid: 911317a09f81474cb2af87cb21fb69a1
-      name: Collector stale managed host names
-      type: DEPENDENT
-      key: central.collector.stale_managed_host_names
-      value_type: TEXT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.zabbix_managed_hosts_status.stale_host_names
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-    - uuid: 6090b1435d9b47bca942832de4c0e207
-      name: Collector stale managed hosts
-      type: DEPENDENT
-      key: central.collector.stale_managed_hosts
-      value_type: TEXT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.zabbix_managed_hosts_status.stale_hosts
-      master_item:
-        key: central.collector.health
-      tags:
-      - tag: component
-        value: collector
-    discovery_rules:
-    - uuid: 2f6459e3c7024a9f87beb2352328406d
-      name: HPE GreenLake subscription discovery
-      type: TRAP
-      key: central.licenses.discovery
-      lifetime: 7d
-      item_prototypes:
-      - uuid: 13c926bf8d884b77a8629b0a1abef640
-        name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
-          data'
-        type: TRAP
-        key: central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]
-        history: '0'
-        trends: '0'
-        value_type: TEXT
-        tags:
-        - tag: component
-          value: license
-      - uuid: ec7f8b0f66be4a5c9a2f222fe2a93c86
-        name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
-          days until expiry'
-        type: DEPENDENT
-        key: central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]
-        value_type: FLOAT
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.days_until_expiry
-        master_item:
-          key: central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]
-        tags:
-        - tag: component
-          value: license
-        units: d
-      - uuid: fcf1c3fcc40749f095111c4614b651ef
-        name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
-          available quantity'
-        type: DEPENDENT
-        key: central.license.available[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]
-        value_type: UNSIGNED
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.available_quantity
-        master_item:
-          key: central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]
-        tags:
-        - tag: component
-          value: license
-      - uuid: 22c06dec84174c13ad2e6bbef23d450c
-        name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
-          status'
-        type: DEPENDENT
-        key: central.license.status[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.subscription_status
-        master_item:
-          key: central.license.raw[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}]
-        tags:
-        - tag: component
-          value: license
-      trigger_prototypes:
-      - uuid: 8c6fd23737c9489ab40e92393e95d4f4
-        expression: last(/HPE Aruba Central NG - Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<0
-        name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
-          expired'
-        priority: HIGH
-        tags:
-        - tag: scope
-          value: performance
-      - uuid: b22b3a82aa2d4530a79f31ce4bb60aa6
-        expression: last(/HPE Aruba Central NG - Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])>=0
-          and last(/HPE Aruba Central NG - Collector/central.license.days_until_expiry[{#LICENSE_SCOPE},{#LICENSE_OWNER_ID},{#LICENSE_ID}])<={$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS}
-        name: 'License {#LICENSE_OWNER_NAME} {#LICENSE_TIER} {#LICENSE_KEY_SUFFIX}:
-          expires within {$CENTRAL.LICENSE.EXPIRY.WARNING.DAYS} days'
-        priority: WARNING
-        tags:
-        - tag: scope
-          value: performance
-  - uuid: 29e9b9ac0a36463bbded19a0bdb2b59d
-    template: HPE Aruba Central NG - Site
-    name: HPE Aruba Central NG - Site
-    description: Placeholder for future site-level aggregate HPE Aruba Central items.
-    groups:
-    - name: Templates/Network devices
-    items:
-    - uuid: 4621777c4ac544c28578bbec6cbba4ef
-      name: Central site data
-      type: TRAP
-      key: central.site.raw
+    - uuid: e77cd7deb4b645d8a881aab339804248
+      name: Gateway health raw
+      type: HTTP_AGENT
+      key: central.gateway.health.raw
+      delay: '{$CENTRAL.GATEWAY.POLL_INTERVAL}'
       history: '0'
       trends: '0'
       value_type: TEXT
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/health'
+      request_method: GET
+      timeout: 10s
+      status_codes: '200'
       tags:
       - tag: component
-        value: site
-  - uuid: 5eee72e75c4a46dbacfac95d92e183cc
-    template: HPE Aruba Central NG - AP
-    name: HPE Aruba Central NG - AP
-    description: Per-access-point HPE Aruba Central items pushed by the external collector.
-    groups:
-    - name: Templates/Network devices
-    items:
-    - uuid: e4e159a5ddd84b8089d3b6d9e714b804
-      name: AP data
-      type: TRAP
-      key: central.ap.raw
-      history: '0'
-      trends: '0'
-      value_type: TEXT
-      tags:
-      - tag: component
-        value: raw
-    - uuid: daa831916a2a4647a09d4425e8f633ff
-      name: AP status
-      type: DEPENDENT
-      key: central.ap.status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.status
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: availability
-      triggers:
-      - uuid: d8d43dd5ef1f41479e41a460def2f8f2
-        expression: last(/HPE Aruba Central NG - AP/central.ap.status)<>"ONLINE"
-        name: 'AP: not online'
-        priority: HIGH
-        tags:
-        - tag: scope
-          value: availability
-    - uuid: 2c0d859f47444796a41237493b357c5c
-      name: AP CPU utilization
-      type: DEPENDENT
-      key: central.ap.cpu
-      value_type: FLOAT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.cpu_utilization
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: cpu
-      units: '%'
-      triggers:
-      - uuid: 0da0fa219fc14473be44af4ec72034ea
-        expression: min(/HPE Aruba Central NG - AP/central.ap.cpu,15m)>85
-        name: 'AP: high CPU utilization'
-        priority: WARNING
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: 90b75dbcbc10458498685a79a47ac339
-      name: AP memory utilization
-      type: DEPENDENT
-      key: central.ap.memory
-      value_type: FLOAT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.memory_utilization
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: memory
-      units: '%'
-      triggers:
-      - uuid: a02f330a52444d139489d5acd3139720
-        expression: min(/HPE Aruba Central NG - AP/central.ap.memory,15m)>85
-        name: 'AP: high memory utilization'
-        status: DISABLED
-        priority: WARNING
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: 7f6aa6260c0b4e1eb684de9518c3588f
-      name: AP uptime
-      type: DEPENDENT
-      key: central.ap.uptime
-      value_type: FLOAT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.uptime_in_millis
-      - type: MULTIPLIER
-        parameters:
-        - '0.001'
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: system
-      units: s
-    - uuid: a3103b6aad344564babff7ad9babd43f
-      name: AP firmware
-      type: DEPENDENT
-      key: central.ap.firmware
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.firmware
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: inventory
-    - uuid: 0010fe5c192f49f694ceb5eb2fdaaf0b
-      name: AP connected wireless clients
-      type: DEPENDENT
-      key: central.ap.clients_connected
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.clients_connected
-        error_handler: CUSTOM_VALUE
-        error_handler_params: '0'
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: clients
-    - uuid: db3d5333866a4ddcbccbc0f66aaea12a
-      name: AP eth0 status
-      type: DEPENDENT
-      key: central.ap.eth0.status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.ports[?(@.name=="eth0")].status.first()
-        error_handler: CUSTOM_VALUE
-        error_handler_params: UNKNOWN
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: interface
-      triggers:
-      - uuid: e650657d65414d3b90fd04b907fec625
-        expression: last(/HPE Aruba Central NG - AP/central.ap.status)="ONLINE"
-          and last(/HPE Aruba Central NG - AP/central.ap.eth0.status)<>"UP"
-        name: 'AP: eth0 is not up'
-        priority: AVERAGE
-        tags:
-        - tag: scope
-          value: availability
-    - uuid: d2079ce31cea44d88bc9afa378f5cbd3
-      name: AP eth0 speed
-      type: DEPENDENT
-      key: central.ap.eth0.speed
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.ports[?(@.name=="eth0")].speed.first()
-        error_handler: CUSTOM_VALUE
-        error_handler_params: '0'
-      - type: MULTIPLIER
-        parameters:
-        - '1000000'
-      master_item:
-        key: central.ap.raw
-      tags:
-      - tag: component
-        value: interface
-      units: bps
-    discovery_rules:
-    - uuid: 42b87a43588343d087bb5aa4ce548857
-      name: HPE Central AP radio discovery
-      type: TRAP
-      key: central.ap.radios.discovery
-      lifetime: 7d
-      item_prototypes:
-      - uuid: a3861d35e45842dda06bb6b8ea300fee
-        name: 'AP radio {#RADIO_BAND}: data'
-        type: TRAP
-        key: central.ap.radio.raw[{#RADIO_NUMBER}]
-        history: '0'
-        trends: '0'
-        value_type: TEXT
-        tags:
-        - tag: component
-          value: radio
-      - uuid: f125031d23e24fc3ab0d141a642b58fe
-        name: 'AP radio {#RADIO_BAND}: AP status'
-        type: DEPENDENT
-        key: central.ap.radio.ap_status[{#RADIO_NUMBER}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.ap_status
-        master_item:
-          key: central.ap.radio.raw[{#RADIO_NUMBER}]
-        tags:
-        - tag: component
-          value: availability
-      - uuid: a86ee7e223af4480aa6ff2d3be7d08a3
-        name: 'AP radio {#RADIO_BAND}: status'
-        type: DEPENDENT
-        key: central.ap.radio.status[{#RADIO_NUMBER}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.status
-        master_item:
-          key: central.ap.radio.raw[{#RADIO_NUMBER}]
-        tags:
-        - tag: component
-          value: radio
-      - uuid: 8bb95ffa4e97402e91473935f2180655
-        name: 'AP radio {#RADIO_BAND}: channel utilization'
-        type: DEPENDENT
-        key: central.ap.radio.channel_utilization[{#RADIO_NUMBER}]
-        value_type: FLOAT
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.channel_utilization
-          error_handler: CUSTOM_VALUE
-          error_handler_params: '0'
-        master_item:
-          key: central.ap.radio.raw[{#RADIO_NUMBER}]
-        tags:
-        - tag: component
-          value: radio
-        units: '%'
-      - uuid: 7fb9d21cb84d4a51b1bdb71ec03d0073
-        name: 'AP radio {#RADIO_BAND}: noise floor'
-        type: DEPENDENT
-        key: central.ap.radio.noise_floor[{#RADIO_NUMBER}]
-        value_type: FLOAT
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.noise_floor
-          error_handler: CUSTOM_VALUE
-          error_handler_params: '-100'
-        master_item:
-          key: central.ap.radio.raw[{#RADIO_NUMBER}]
-        tags:
-        - tag: component
-          value: radio
-        units: dBm
-      - uuid: bfed280609d7459ca3f9d9d58fe999c1
-        name: 'AP radio {#RADIO_BAND}: channel'
-        type: DEPENDENT
-        key: central.ap.radio.channel[{#RADIO_NUMBER}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.channel
-        master_item:
-          key: central.ap.radio.raw[{#RADIO_NUMBER}]
-        tags:
-        - tag: component
-          value: radio
-      trigger_prototypes:
-      - uuid: 0ae35b01dbfd475ab7e5cbf7529dd31b
-        expression: last(/HPE Aruba Central NG - AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
-          and last(/HPE Aruba Central NG - AP/central.ap.radio.status[{#RADIO_NUMBER}])<>"UP"
-        name: 'AP: radio {#RADIO_BAND} is not up'
-        priority: AVERAGE
-        tags:
-        - tag: scope
-          value: availability
-      - uuid: b30f845d662e487bb7c3c1a3f903dcf7
-        expression: last(/HPE Aruba Central NG - AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
-          and min(/HPE Aruba Central NG - AP/central.ap.radio.channel_utilization[{#RADIO_NUMBER}],15m)>80
-        name: 'AP: high radio {#RADIO_BAND} channel utilization'
-        priority: WARNING
-        tags:
-        - tag: scope
-          value: performance
-      - uuid: f6dc417cc7484cb4bce9892781f5d5e0
-        expression: last(/HPE Aruba Central NG - AP/central.ap.radio.ap_status[{#RADIO_NUMBER}])="ONLINE"
-          and min(/HPE Aruba Central NG - AP/central.ap.radio.noise_floor[{#RADIO_NUMBER}],15m)>-85
-        name: 'AP: high radio {#RADIO_BAND} noise floor'
-        priority: WARNING
-        tags:
-        - tag: scope
-          value: performance
-  - uuid: 86ee6cd7f7ca4c6a86e394b4c160f84e
-    template: HPE Aruba Central NG - Switch
-    name: HPE Aruba Central NG - Switch
-    description: Per-switch HPE Aruba Central items pushed by the external collector.
-    groups:
-    - name: Templates/Network devices
-    items:
-    - uuid: 85bc8bede5b446a0bd49370584cd3910
-      name: Switch data
-      type: TRAP
-      key: central.switch.raw
-      history: '0'
-      trends: '0'
-      value_type: TEXT
-      tags:
-      - tag: component
-        value: raw
-    - uuid: 129307f2f2564b429b7e4917966a7b52
-      name: Switch status
-      type: DEPENDENT
-      key: central.switch.status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.status
-      master_item:
-        key: central.switch.raw
-      tags:
-      - tag: component
-        value: availability
-      triggers:
-      - uuid: 579f19068cd1434193576973edc1ec57
-        expression: last(/HPE Aruba Central NG - Switch/central.switch.status)<>"ONLINE"
-        name: 'Switch: not online'
-        priority: HIGH
-        tags:
-        - tag: scope
-          value: availability
-    - uuid: c6e781b40ae4430dbd7dc679f0845830
-      name: Switch health
-      type: DEPENDENT
-      key: central.switch.health
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.health
-      master_item:
-        key: central.switch.raw
-      tags:
-      - tag: component
-        value: health
-      triggers:
-      - uuid: 575922e9b8d543ed9a377a5dd862e857
-        expression: last(/HPE Aruba Central NG - Switch/central.switch.health)<>"Good"
-        name: 'Switch: health is not good'
-        priority: AVERAGE
-        tags:
-        - tag: scope
-          value: performance
-    - uuid: 93a2640056094d2e9560a0e774b1a2e8
-      name: Switch config status
-      type: DEPENDENT
-      key: central.switch.config_status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.config_status
-      master_item:
-        key: central.switch.raw
-      tags:
-      - tag: component
-        value: configuration
-    - uuid: 6cc616f3b29b4b6889e888984e375d96
-      name: Switch firmware
-      type: DEPENDENT
-      key: central.switch.firmware
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.firmware
-      master_item:
-        key: central.switch.raw
-      tags:
-      - tag: component
-        value: inventory
-    - uuid: 13bb97a179cd4a7b9d6cab2ef84459c0
-      name: Switch uptime
-      type: DEPENDENT
-      key: central.switch.uptime
-      value_type: FLOAT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.uptime_in_millis
-      - type: MULTIPLIER
-        parameters:
-        - '0.001'
-      master_item:
-        key: central.switch.raw
-      tags:
-      - tag: component
-        value: system
-      units: s
-    - uuid: 7d1de307e1874bc98dc55c18b7a1ba58
-      name: Switch VSX data
-      type: TRAP
-      key: central.switch.vsx.raw
-      history: '0'
-      trends: '0'
-      value_type: TEXT
-      tags:
-      - tag: component
-        value: vsx
-    - uuid: efccffda35814221b961bab0dea163c7
-      name: Switch VSX status
-      type: DEPENDENT
-      key: central.switch.vsx.status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.status
-        error_handler: CUSTOM_VALUE
-        error_handler_params: Unknown
-      master_item:
-        key: central.switch.vsx.raw
-      tags:
-      - tag: component
-        value: vsx
-    - uuid: 844cf8eb593c4cb8843a6f4a0d706641
-      name: Switch hardware trends data
-      type: TRAP
-      key: central.switch.hardware_trends.raw
-      history: '0'
-      trends: '0'
-      value_type: TEXT
-      tags:
-      - tag: component
-        value: hardware-trends
-    - uuid: 6b764bf78ad24fb9b28fabe370ff4501
-      name: Switch hardware trend CPU utilization
-      type: DEPENDENT
-      key: central.switch.hardware_trends.cpu
-      value_type: FLOAT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.cpu_utilization
-        error_handler: CUSTOM_VALUE
-        error_handler_params: '0'
-      master_item:
-        key: central.switch.hardware_trends.raw
-      tags:
-      - tag: component
-        value: hardware-trends
-      units: '%'
-    - uuid: 2687c7715b304bccaa0a52757a595440
-      name: Switch hardware trend memory utilization
-      type: DEPENDENT
-      key: central.switch.hardware_trends.memory
-      value_type: FLOAT
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.memory_utilization
-        error_handler: CUSTOM_VALUE
-        error_handler_params: '0'
-      master_item:
-        key: central.switch.hardware_trends.raw
-      tags:
-      - tag: component
-        value: hardware-trends
-      units: '%'
-    discovery_rules:
-    - uuid: da19ef9543a349d6914849e5bf6adcb5
-      name: HPE Central switch interface discovery
-      type: TRAP
-      key: central.switch.interfaces.discovery
-      lifetime: 7d
-      item_prototypes:
-      - uuid: 413121bc9f2449de9c98f9ac2716d51d
-        name: 'Switch port {#PORT_NAME}: data'
-        type: TRAP
-        key: central.switch.interface.raw[{#PORT_INDEX}]
-        history: '0'
-        trends: '0'
-        value_type: TEXT
-        tags:
-        - tag: component
-          value: interface
-      - uuid: a0734a158c384ec09b5f780f324931aa
-        name: 'Switch port {#PORT_NAME}: status'
-        type: DEPENDENT
-        key: central.switch.interface.status[{#PORT_INDEX}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.status
-        master_item:
-          key: central.switch.interface.raw[{#PORT_INDEX}]
-        tags:
-        - tag: component
-          value: interface
-      - uuid: 00b7d80ed04e429590c36fdd7743f556
-        name: 'Switch port {#PORT_NAME}: admin status'
-        type: DEPENDENT
-        key: central.switch.interface.admin_status[{#PORT_INDEX}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.admin_status
-        master_item:
-          key: central.switch.interface.raw[{#PORT_INDEX}]
-        tags:
-        - tag: component
-          value: interface
-      - uuid: 628df933f8644ef491450a9862801270
-        name: 'Switch port {#PORT_NAME}: operational status'
-        type: DEPENDENT
-        key: central.switch.interface.oper_status[{#PORT_INDEX}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.oper_status
-        master_item:
-          key: central.switch.interface.raw[{#PORT_INDEX}]
-        tags:
-        - tag: component
-          value: interface
-      - uuid: 2b242ffd58514009b59f0a73ddffc014
-        name: 'Switch port {#PORT_NAME}: speed'
-        type: DEPENDENT
-        key: central.switch.interface.speed[{#PORT_INDEX}]
-        value_type: UNSIGNED
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.speed_bps
-          error_handler: CUSTOM_VALUE
-          error_handler_params: '0'
-        master_item:
-          key: central.switch.interface.raw[{#PORT_INDEX}]
-        tags:
-        - tag: component
-          value: interface
-        units: bps
-    - uuid: 8efef8c15ed649da97b7a3cff0309092
-      name: HPE Central switch LAG discovery
-      type: TRAP
-      key: central.switch.lags.discovery
-      lifetime: 7d
-      item_prototypes:
-      - uuid: f787a9dd4fc3426aa2bbcc3ab64c0223
-        name: 'Switch LAG {#LAG_NAME}: data'
-        type: TRAP
-        key: central.switch.lag.raw[{#LAG_ID}]
-        history: '0'
-        trends: '0'
-        value_type: TEXT
-        tags:
-        - tag: component
-          value: lag
-      - uuid: 0c10d38b607a439193cf318f857b4f9e
-        name: 'Switch LAG {#LAG_NAME}: status'
-        type: DEPENDENT
-        key: central.switch.lag.status[{#LAG_ID}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.status
-          error_handler: CUSTOM_VALUE
-          error_handler_params: Unknown
-        master_item:
-          key: central.switch.lag.raw[{#LAG_ID}]
-        tags:
-        - tag: component
-          value: lag
-    - uuid: b50bfb34f5c94a7a97da18393ccb4447
-      name: HPE Central switch stack member discovery
-      type: TRAP
-      key: central.switch.stack_members.discovery
-      lifetime: 7d
-      item_prototypes:
-      - uuid: 2823f551f9274c59a24943e56f5bb19b
-        name: 'Switch stack member {#STACK_MEMBER_NAME}: data'
-        type: TRAP
-        key: central.switch.stack_member.raw[{#STACK_MEMBER_ID}]
-        history: '0'
-        trends: '0'
-        value_type: TEXT
-        tags:
-        - tag: component
-          value: stack
-      - uuid: aaf49cdbe9324a39ac233733bb27fc49
-        name: 'Switch stack member {#STACK_MEMBER_NAME}: status'
-        type: DEPENDENT
-        key: central.switch.stack_member.status[{#STACK_MEMBER_ID}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.status
-          error_handler: CUSTOM_VALUE
-          error_handler_params: Unknown
-        master_item:
-          key: central.switch.stack_member.raw[{#STACK_MEMBER_ID}]
-        tags:
-        - tag: component
-          value: stack
-    - uuid: 47ab7b1f57b64a19ad18d8971cef004f
-      name: HPE Central switch hardware discovery
-      type: TRAP
-      key: central.switch.hardware.discovery
-      lifetime: 7d
-      item_prototypes:
-      - uuid: b791e5d231d545528f9b46ae9e4f5079
-        name: 'Switch hardware {#HARDWARE_NAME}: data'
-        type: TRAP
-        key: central.switch.hardware.raw[{#HARDWARE_ID}]
-        history: '0'
-        trends: '0'
-        value_type: TEXT
-        tags:
-        - tag: component
-          value: hardware
-      - uuid: 8596e2b6df7a4700825b73d5544fbcca
-        name: 'Switch hardware {#HARDWARE_NAME}: power supply health'
-        type: DEPENDENT
-        key: central.switch.hardware.power_supplies_health[{#HARDWARE_ID}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.power_supplies_health
-          error_handler: CUSTOM_VALUE
-          error_handler_params: Unknown
-        master_item:
-          key: central.switch.hardware.raw[{#HARDWARE_ID}]
-        tags:
-        - tag: component
-          value: hardware
-      - uuid: f76bd25bf3b44913bce12488ddd761bf
-        name: 'Switch hardware {#HARDWARE_NAME}: fan health'
-        type: DEPENDENT
-        key: central.switch.hardware.fans_health[{#HARDWARE_ID}]
-        value_type: CHAR
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.fans_health
-          error_handler: CUSTOM_VALUE
-          error_handler_params: Unknown
-        master_item:
-          key: central.switch.hardware.raw[{#HARDWARE_ID}]
-        tags:
-        - tag: component
-          value: hardware
-  - uuid: af88b70b28ba4aad85ae8ebc2fc9b37b
-    template: HPE Aruba Central NG - Gateway
-    name: HPE Aruba Central NG - Gateway
-    description: Per-gateway HPE Aruba Central items pushed by the external collector.
-    groups:
-    - name: Templates/Network devices
-    items:
-    - uuid: 1e96497475b247d8b8fcc8834a9ecaf2
-      name: Gateway data
-      type: TRAP
-      key: central.gateway.raw
-      history: '0'
-      trends: '0'
-      value_type: TEXT
-      tags:
-      - tag: component
-        value: raw
-    - uuid: 29f245a969634bb2816e1fadc2993004
+        value: gateway
+    - uuid: c5197dad779b4a48a6da2e1918b3238a
       name: Gateway status
       type: DEPENDENT
       key: central.gateway.status
@@ -1075,9 +44,608 @@ zabbix_export:
       preprocessing:
       - type: JSONPATH
         parameters:
-        - $.status
+        - $.gateway.status
       master_item:
-        key: central.gateway.raw
+        key: central.gateway.health.raw
+      triggers:
+      - uuid: 386501bdef40492c8705f6e70f534411
+        expression: last(/HPE Aruba Central NG - Gateway/central.gateway.status)<>"ok"
+        name: 'HPE Central gateway: status is not ok'
+        priority: HIGH
+    - uuid: 1309a02d2e384bde88dca851288f9594
+      name: Gateway version
+      type: DEPENDENT
+      key: central.gateway.version
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.gateway.version
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: d239394651e043b8a169ef1401c27639
+      name: Gateway managed device count
+      type: DEPENDENT
+      key: central.gateway.device_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.state.device_count
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: a83639c195f54c5584c3c0b471576a86
+      name: Gateway package status
+      type: DEPENDENT
+      key: central.gateway.package_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.package.status
+      master_item:
+        key: central.gateway.health.raw
+      triggers:
+      - uuid: a36f7f7145154f699adbfb5c0f126406
+        expression: last(/HPE Aruba Central NG - Gateway/central.gateway.package_status)="outdated"
+        name: 'HPE Central gateway: package update available'
+        priority: WARNING
+    - uuid: b1470eefeee14533bafe3b424ad2c94d
+      name: Gateway latest app version
+      type: DEPENDENT
+      key: central.gateway.app_latest_version
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.package.app.latest
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: 5cecb6e6bad64708a4fc732b3083b0be
+      name: Gateway latest template version
+      type: DEPENDENT
+      key: central.gateway.template_latest_version
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.package.template.latest
+      master_item:
+        key: central.gateway.health.raw
+
+  - uuid: b525b1eac6a24f859fbcec657130987d
+    template: HPE Aruba Central NG - Site
+    name: HPE Aruba Central NG - Site
+    description: Site health and client onboarding monitoring through the HPE Aruba
+      Central NG gateway/cache service.
+    groups:
+    - name: Templates/Network devices
+    macros:
+    - macro: '{$CENTRAL.GATEWAY.URL}'
+      value: http://127.0.0.1:8080
+    - macro: '{$CENTRAL.SITE.ID}'
+      value: ''
+    - macro: '{$CENTRAL.SITE.POLL_INTERVAL}'
+      value: 5m
+    - macro: '{$CENTRAL.SITE.ONBOARDING.POLL_INTERVAL}'
+      value: 10m
+    items:
+    - uuid: 05611274213042419df37a7beec22f22
+      name: Site health raw master item
+      type: HTTP_AGENT
+      key: central.site.health.raw
+      delay: '{$CENTRAL.SITE.POLL_INTERVAL}'
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Master HTTP item used by dependent site health items.
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/site/{$CENTRAL.SITE.ID}/health'
+      request_method: GET
+      timeout: 20s
+      status_codes: '200'
       tags:
       - tag: component
-        value: availability
+        value: site
+    - uuid: 70bcf4b4b1424b7d937538643f16113e
+      name: Site gateway status
+      type: DEPENDENT
+      key: central.site.gateway_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.gateway.status
+      master_item:
+        key: central.site.health.raw
+      triggers:
+      - uuid: 66fd3bec70ef43678ba9b7ce862a7d73
+        expression: last(/HPE Aruba Central NG - Site/central.site.gateway_status)<>"ok"
+        name: 'Site {HOST.NAME}: Central gateway data is unavailable'
+        priority: WARNING
+    - uuid: a70346895c1d4f34a9cdd82630405f0e
+      name: Site health good score
+      type: DEPENDENT
+      key: central.site.health.good
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.health.groups[?(@.name=="Good")].value.first()
+      master_item:
+        key: central.site.health.raw
+    - uuid: dc4b6ab192ff4afca17323788f4de670
+      name: Site health fair score
+      type: DEPENDENT
+      key: central.site.health.fair
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.health.groups[?(@.name=="Fair")].value.first()
+      master_item:
+        key: central.site.health.raw
+    - uuid: 395097270ec44a3fb9ee5120d51b888b
+      name: Site health poor score
+      type: DEPENDENT
+      key: central.site.health.poor
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.health.groups[?(@.name=="Poor")].value.first()
+      master_item:
+        key: central.site.health.raw
+      triggers:
+      - uuid: 9103c7efdfb94720988f248671064cb5
+        expression: last(/HPE Aruba Central NG - Site/central.site.health.poor)>0
+        name: 'Site {HOST.NAME}: poor health detected'
+        priority: AVERAGE
+    - uuid: 2fedbfbdc29342bf80eff691981b73ef
+      name: Site client onboarding raw master item
+      type: HTTP_AGENT
+      key: central.site.client_onboarding.raw
+      delay: '{$CENTRAL.SITE.ONBOARDING.POLL_INTERVAL}'
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Master HTTP item used by dependent client onboarding items.
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/site/{$CENTRAL.SITE.ID}/client-onboarding-stage/count?field=topreasons&window-ms=3600000'
+      request_method: GET
+      timeout: 20s
+      status_codes: '200'
+      tags:
+      - tag: component
+        value: site
+    - uuid: 7afa7bad719f4492a30c76e422bf6548
+      name: Site client onboarding failed count
+      type: DEPENDENT
+      key: central.site.client_onboarding.failed_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.count
+      master_item:
+        key: central.site.client_onboarding.raw
+      triggers:
+      - uuid: 3bdd3dded06d44bc9c8375bc8225b9d5
+        expression: last(/HPE Aruba Central NG - Site/central.site.client_onboarding.failed_count)>50
+        name: 'Site {HOST.NAME}: high client onboarding failure count'
+        priority: WARNING
+        status: DISABLED
+
+  - uuid: 06555628289844408980746ebc6ea54c
+    template: HPE Aruba Central NG - AP
+    name: HPE Aruba Central NG - AP
+    description: AP monitoring through the HPE Aruba Central NG gateway/cache service.
+    groups:
+    - name: Templates/Network devices
+    macros:
+    - macro: '{$CENTRAL.GATEWAY.URL}'
+      value: http://127.0.0.1:8080
+    - macro: '{$CENTRAL.DEVICE.KEY}'
+      value: ''
+    - macro: '{$CENTRAL.AP.POLL_INTERVAL}'
+      value: 5m
+    items:
+    - uuid: 443bf5425ad14ea99b0cd7c23b0cebaf
+      name: AP raw master item
+      type: HTTP_AGENT
+      key: central.device.raw
+      delay: '{$CENTRAL.AP.POLL_INTERVAL}'
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Master HTTP item used by dependent items. History is disabled
+        intentionally.
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
+      request_method: GET
+      timeout: 20s
+      status_codes: '200'
+      tags:
+      - tag: component
+        value: ap
+    - uuid: 6145811d2c4a40a1b3e58d81472d612c
+      name: AP gateway status
+      type: DEPENDENT
+      key: central.device.gateway_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.gateway.status
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 4a31e94ad67a45f9bfd26220ba2c4a93
+        expression: last(/HPE Aruba Central NG - AP/central.device.gateway_status)<>"ok"
+        name: 'AP {HOST.NAME}: Central gateway data is stale or unavailable'
+        priority: WARNING
+    - uuid: d176fb5c663b4cc3ba352c698e2e69ba
+      name: AP status
+      type: DEPENDENT
+      key: central.device.status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.status
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 503c17b27f2d443b93715ebe60b3e856
+        expression: last(/HPE Aruba Central NG - AP/central.device.status)<>"ONLINE"
+        name: 'AP {HOST.NAME}: not online'
+        priority: HIGH
+    - uuid: 9dfed9f0f56043338837c2bfb6cf5926
+      name: AP firmware
+      type: DEPENDENT
+      key: central.device.firmware
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware
+      master_item:
+        key: central.device.raw
+    - uuid: 3c1b0d4781fa48d8bfdeb7d5e1fd56bf
+      name: AP uptime
+      type: DEPENDENT
+      key: central.device.uptime_ms
+      value_type: UNSIGNED
+      units: uptime
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uptime_seconds
+      master_item:
+        key: central.device.raw
+    - uuid: 92cd47b770da4fd6b7c582f8e93c2143
+      name: AP recommended firmware
+      type: DEPENDENT
+      key: central.device.firmware_recommended
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_recommended_version
+      master_item:
+        key: central.device.raw
+    - uuid: cf7f31ad5449491aad796c742b96c15a
+      name: AP firmware last upgraded
+      type: DEPENDENT
+      key: central.device.firmware_last_upgraded
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_last_upgraded_at
+      master_item:
+        key: central.device.raw
+    - uuid: 00ca760e1e084e3daf4ae9b8a85b7c73
+      name: AP radio down count
+      type: DEPENDENT
+      key: central.ap.radio_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.radio_down_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 53286e7531334cd981ce39ac8d04e98d
+        expression: last(/HPE Aruba Central NG - AP/central.ap.radio_down_count)>0
+          and last(/HPE Aruba Central NG - AP/central.device.status)="ONLINE"
+        name: 'AP {HOST.NAME}: one or more radios are down'
+        priority: AVERAGE
+    - uuid: 60b5f07f642d4170859605ca25d1f266
+      name: AP port down count
+      type: DEPENDENT
+      key: central.device.port_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.port_down_count
+      master_item:
+        key: central.device.raw
+    - uuid: 4761215301cb4f95838ab1b3070d4392
+      name: AP error count
+      type: DEPENDENT
+      key: central.device.error_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.error_count
+      master_item:
+        key: central.device.raw
+    - uuid: 64a1300bed224c3698a7f7e99a8d8a3f
+      name: AP CPU utilization
+      type: DEPENDENT
+      key: central.device.cpu_utilization
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.cpu_utilization
+      master_item:
+        key: central.device.raw
+    - uuid: 95232aaba0034578a6fc6effcca6ed4d
+      name: AP memory utilization
+      type: DEPENDENT
+      key: central.device.memory_utilization
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.memory_utilization
+      master_item:
+        key: central.device.raw
+
+  - uuid: db297f5e6595423a91f8c960f754f1f3
+    template: HPE Aruba Central NG - Switch
+    name: HPE Aruba Central NG - Switch
+    description: Switch monitoring through the HPE Aruba Central NG gateway/cache service.
+    groups:
+    - name: Templates/Network devices
+    macros:
+    - macro: '{$CENTRAL.GATEWAY.URL}'
+      value: http://127.0.0.1:8080
+    - macro: '{$CENTRAL.DEVICE.KEY}'
+      value: ''
+    - macro: '{$CENTRAL.SWITCH.POLL_INTERVAL}'
+      value: 5m
+    items:
+    - uuid: 0bd8a1e829d046fca0e15f1f4a09be04
+      name: Switch raw master item
+      type: HTTP_AGENT
+      key: central.device.raw
+      delay: '{$CENTRAL.SWITCH.POLL_INTERVAL}'
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Master HTTP item used by dependent items. History is disabled
+        intentionally.
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
+      request_method: GET
+      timeout: 20s
+      status_codes: '200'
+      tags:
+      - tag: component
+        value: switch
+    - uuid: c2ed92eedd624958ac327445f4fd22b5
+      name: Switch gateway status
+      type: DEPENDENT
+      key: central.device.gateway_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.gateway.status
+      master_item:
+        key: central.device.raw
+    - uuid: 23a0637cd4b547f1865fd0bc0b29b382
+      name: Switch status
+      type: DEPENDENT
+      key: central.device.status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.status
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: e0ff0cc5f7d049a8bc5e734d5271dd26
+        expression: last(/HPE Aruba Central NG - Switch/central.device.status)<>"ONLINE"
+        name: 'Switch {HOST.NAME}: not online'
+        priority: HIGH
+    - uuid: 5beca6b1cf1741d79fb08e131f1cb465
+      name: Switch firmware
+      type: DEPENDENT
+      key: central.device.firmware
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware
+      master_item:
+        key: central.device.raw
+    - uuid: 8585f292ed5a4f11a0566fe535df4ec6
+      name: Switch uptime
+      type: DEPENDENT
+      key: central.device.uptime_ms
+      value_type: UNSIGNED
+      units: uptime
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uptime_seconds
+      master_item:
+        key: central.device.raw
+    - uuid: a233bb988b214077a92de9898c95358f
+      name: Switch recommended firmware
+      type: DEPENDENT
+      key: central.device.firmware_recommended
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_recommended_version
+      master_item:
+        key: central.device.raw
+    - uuid: ed08149b171c42b8b94f2319900fb9e1
+      name: Switch firmware last upgraded
+      type: DEPENDENT
+      key: central.device.firmware_last_upgraded
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_last_upgraded_at
+      master_item:
+        key: central.device.raw
+    - uuid: df908bf3935a4a8a83336ee80029daf9
+      name: Switch interface down count
+      type: DEPENDENT
+      key: central.switch.interface_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.interface_down_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 33064076cfb04408a331ac660917ca5f
+        expression: last(/HPE Aruba Central NG - Switch/central.switch.interface_down_count)>0
+        name: 'Switch {HOST.NAME}: one or more interfaces are down'
+        priority: INFO
+        status: DISABLED
+    - uuid: a73b7ffb99264164be0cd8b8910a5ae6
+      name: Switch CRC error count
+      type: DEPENDENT
+      key: central.switch.crc_error_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.crc_error_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 7695c1c3b794432290b0b87f3316e419
+        expression: change(/HPE Aruba Central NG - Switch/central.switch.crc_error_count)>100
+        name: 'Switch {HOST.NAME}: high CRC error increase'
+        priority: AVERAGE
+        status: DISABLED
+    - uuid: ff7d5477c461402abf01039c343db665
+      name: Switch packet drop count
+      type: DEPENDENT
+      key: central.switch.drop_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.drop_count
+      master_item:
+        key: central.device.raw
+    - uuid: 1263604ff162424dbbe869d15ac918fa
+      name: Switch config status
+      type: DEPENDENT
+      key: central.device.config_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.config_status
+      master_item:
+        key: central.device.raw
+
+  - uuid: 385c21706cac460d972aa60ff6b26bfb
+    template: HPE Aruba Central NG - Gateway Device
+    name: HPE Aruba Central NG - Gateway Device
+    description: Gateway device monitoring through the HPE Aruba Central NG gateway/cache service.
+    groups:
+    - name: Templates/Network devices
+    macros:
+    - macro: '{$CENTRAL.GATEWAY.URL}'
+      value: http://127.0.0.1:8080
+    - macro: '{$CENTRAL.DEVICE.KEY}'
+      value: ''
+    - macro: '{$CENTRAL.GATEWAY.DEVICE.POLL_INTERVAL}'
+      value: 5m
+    items:
+    - uuid: 21f2179436f14f1987e3d139dcfe63b7
+      name: Gateway device raw master item
+      type: HTTP_AGENT
+      key: central.device.raw
+      delay: '{$CENTRAL.GATEWAY.DEVICE.POLL_INTERVAL}'
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Master HTTP item used by dependent items. History is disabled
+        intentionally.
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
+      request_method: GET
+      timeout: 20s
+      status_codes: '200'
+      tags:
+      - tag: component
+        value: gateway
+    - uuid: 0012de0bbb08426d84f125b3f82aac59
+      name: Gateway device status
+      type: DEPENDENT
+      key: central.device.status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.status
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 35f4ab4a7e0841899c69f2206918249a
+        expression: last(/HPE Aruba Central NG - Gateway Device/central.device.status)<>"ONLINE"
+        name: 'Gateway {HOST.NAME}: not online'
+        priority: HIGH
+    - uuid: 8a052b3fd93c41a4a8450513097b2a84
+      name: Gateway recommended firmware
+      type: DEPENDENT
+      key: central.device.firmware_recommended
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_recommended_version
+      master_item:
+        key: central.device.raw
+    - uuid: 43f2db88b11946438bad2b011bd9fbdc
+      name: Gateway firmware last upgraded
+      type: DEPENDENT
+      key: central.device.firmware_last_upgraded
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_last_upgraded_at
+      master_item:
+        key: central.device.raw
+    - uuid: 41bd8b303d4c4baab002f37d148b8340
+      name: Gateway port down count
+      type: DEPENDENT
+      key: central.device.port_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.port_down_count
+      master_item:
+        key: central.device.raw
