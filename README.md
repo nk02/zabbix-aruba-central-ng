@@ -108,6 +108,30 @@ Important settings:
 - `zabbix.unmapped_host_group`: landing host group for new managed hosts.
 - `zabbix.gateway_host`: Zabbix host used for gateway health.
 
+## Zabbix API Permissions
+
+Use a dedicated Zabbix user and API token. The user must be allowed to call these API methods:
+
+```text
+configuration.import
+hostgroup.get
+hostgroup.create
+template.get
+host.get
+host.create
+host.update
+```
+
+`hostgroup.create` is only needed if `zabbix.unmapped_host_group` does not already exist.
+
+The user group should have read-write permissions on:
+
+- the host group configured in `zabbix.unmapped_host_group`;
+- any host group where managed hosts will be moved later, or a shared technical group that remains on every managed host;
+- the template group `Templates/Network devices`.
+
+The template group must already exist. The importer does not create template groups because Zabbix can require Super Admin privileges for template group creation/update checks, especially on built-in groups.
+
 Host tags are configurable:
 
 ```json

@@ -16,9 +16,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.5"
+TEMPLATE_VERSION = "2.0.6"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -698,7 +698,7 @@ def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[
     zabbix_api_call(config, "configuration.import", {
         "format": "yaml",
         "rules": {
-            "template_groups": {"createMissing": True},
+            "template_groups": {"createMissing": False},
             "templates": {"createMissing": True, "updateExisting": True},
             "items": {"createMissing": True, "updateExisting": True},
             "triggers": {"createMissing": True, "updateExisting": True},
