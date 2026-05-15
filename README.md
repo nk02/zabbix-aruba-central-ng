@@ -25,6 +25,12 @@ The gateway keeps all Aruba API calls behind one rate limiter. The default is `8
 - A server that can reach GreenLake, Aruba Central New Central APIs, and Zabbix API.
 - Zabbix must be able to reach the gateway HTTP URL.
 
+## Deployment And Exposure
+
+Expose the gateway only when Zabbix needs to reach it from outside the local network, for example with Zabbix Cloud. In that case, publish it through a protected endpoint such as Cloudflare Tunnel plus access controls, and avoid exposing plain TCP `8080` directly to the Internet.
+
+When Zabbix runs on a local VM or on the same private network, keep the gateway private. The recommended deployment is a VM or service host in the same L2/L3 network as Zabbix or the Zabbix proxy, with `gateway.base_url` pointing to an internal DNS name or IP address. Do not publish port `8080` publicly in this scenario.
+
 ## GreenLake Credentials
 
 For each GreenLake workspace collect:
