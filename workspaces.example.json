@@ -20,6 +20,7 @@
     "api_token": "zabbix-api-token",
     "tls_verify": true,
     "unmapped_host_group": "HPE Aruba Central/Unmapped",
+    "template_group": "Templates/Network devices",
     "gateway_host": "HPE Aruba Central Gateway",
     "auto_import_template": true,
     "managed_tag": {

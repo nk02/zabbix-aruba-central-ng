@@ -54,14 +54,14 @@ https://de2.api.central.arubanetworks.com
 
 Copy the example:
 
-```powershell
-Copy-Item .\workspaces.example.json .\workspaces.json
-```
-
-On Linux:
-
 ```bash
 cp workspaces.example.json workspaces.json
+```
+
+On Windows, adapt paths and command names, for example:
+
+```powershell
+Copy-Item .\workspaces.example.json .\workspaces.json
 ```
 
 Minimal structure:
@@ -88,6 +88,7 @@ Minimal structure:
     "api_token": "zabbix-api-token",
     "tls_verify": true,
     "unmapped_host_group": "HPE Aruba Central/Unmapped",
+    "template_group": "Templates/Network devices",
     "gateway_host": "HPE Aruba Central Gateway",
     "auto_import_template": true
   },
@@ -106,6 +107,7 @@ Important settings:
 - `zabbix.tls_verify`: verifies the Zabbix API HTTPS certificate. Default is `true`; set to `false` only for trusted internal endpoints.
 - `zabbix.tls_ca_file`: optional path to a custom CA bundle for the Zabbix API HTTPS certificate.
 - `zabbix.unmapped_host_group`: landing host group for new managed hosts.
+- `zabbix.template_group`: Zabbix template group used by the bundled templates. It must already exist.
 - `zabbix.gateway_host`: Zabbix host used for gateway health.
 
 ## Zabbix API Permissions
@@ -129,9 +131,11 @@ The user group should have read-write permissions on:
 
 - the host group configured in `zabbix.unmapped_host_group`;
 - any host group where managed hosts will be moved later, or a shared technical group that remains on every managed host;
-- the template group `Templates/Network devices`.
+- the template group configured in `zabbix.template_group`.
 
-The bundled template uses the template group `Templates/Network devices`. This group usually already exists on Zabbix 7 installations. The importer checks that it exists, but it does not create template groups because Zabbix can require Super Admin privileges for template group creation/update checks, especially on built-in groups. If the group is missing, create it manually before running `import-zabbix-template --apply`.
+The bundled template uses `Templates/Network devices` by default. This group usually already exists on Zabbix 7 installations. The importer checks that the configured template group exists, but it does not create template groups because Zabbix can require Super Admin privileges for template group creation/update checks, especially on built-in groups. If the group is missing, create it manually before running `import-zabbix-template --apply`.
+
+If templates already exist in Zabbix and were later added to other template groups, the importer preserves those existing extra groups instead of replacing them with only `zabbix.template_group`.
 
 Host tags are configurable:
 
@@ -183,13 +187,9 @@ For standalone workspaces, set `mapping`:
 
 ## Commands
 
+The examples below use Linux syntax. On Windows, use `python` instead of `python3` if needed and adapt paths from `/` to `\`, for example `python .\central_gateway.py config-check`.
+
 Validate configuration:
-
-```powershell
-python .\central_gateway.py config-check
-```
-
-Linux:
 
 ```bash
 python3 ./central_gateway.py config-check
@@ -197,23 +197,11 @@ python3 ./central_gateway.py config-check
 
 Preview template import:
 
-```powershell
-python .\central_gateway.py import-zabbix-template
-```
-
-Linux:
-
 ```bash
 python3 ./central_gateway.py import-zabbix-template
 ```
 
 Apply template import:
-
-```powershell
-python .\central_gateway.py import-zabbix-template --apply
-```
-
-Linux:
 
 ```bash
 python3 ./central_gateway.py import-zabbix-template --apply
@@ -221,17 +209,11 @@ python3 ./central_gateway.py import-zabbix-template --apply
 
 Preview Zabbix synchronization:
 
-```powershell
-python .\central_gateway.py sync-zabbix
+```bash
+python3 ./central_gateway.py sync-zabbix
 ```
 
 Apply Zabbix synchronization:
-
-```powershell
-python .\central_gateway.py sync-zabbix --apply
-```
-
-Linux:
 
 ```bash
 python3 ./central_gateway.py sync-zabbix --apply
@@ -239,17 +221,11 @@ python3 ./central_gateway.py sync-zabbix --apply
 
 Start only the gateway:
 
-```powershell
-python .\central_gateway.py gateway
+```bash
+python3 ./central_gateway.py gateway
 ```
 
 Start gateway and run periodic sync in the same process:
-
-```powershell
-python .\central_gateway.py run
-```
-
-Linux:
 
 ```bash
 python3 ./central_gateway.py run
@@ -349,12 +325,20 @@ Triggers are intentionally conservative. Important triggers such as device down 
 
 ## Operating Model
 
-Recommended first run:
+Recommended test sequence after editing `workspaces.json`:
 
-```powershell
-python .\central_gateway.py config-check
-python .\central_gateway.py sync-zabbix --apply
-python .\central_gateway.py run
+```bash
+python3 ./central_gateway.py config-check
+python3 ./central_gateway.py import-zabbix-template
+python3 ./central_gateway.py import-zabbix-template --apply
+python3 ./central_gateway.py sync-zabbix
+python3 ./central_gateway.py sync-zabbix --apply
+```
+
+Production command:
+
+```bash
+python3 ./central_gateway.py run
 ```
 
 `run` is the preferred production mode. It starts both components in one long-running process:
@@ -364,7 +348,7 @@ python .\central_gateway.py run
 
 The first sync is executed immediately after startup, then repeated at the configured interval.
 
-Alternative split mode is available when you want separate process ownership: run `python .\central_gateway.py gateway` continuously and schedule `python .\central_gateway.py sync-zabbix --apply` every 10 to 30 minutes. The single `run` mode is simpler and is the recommended default.
+Alternative split mode is available when you want separate process ownership: run `python3 ./central_gateway.py gateway` continuously and schedule `python3 ./central_gateway.py sync-zabbix --apply` every 10 to 30 minutes. The single `run` mode is simpler and is the recommended default.
 
 ## Windows Service
 
@@ -419,6 +403,32 @@ Enable it:
 sudo systemctl daemon-reload
 sudo systemctl enable --now hpe-aruba-central-gateway.service
 sudo systemctl status hpe-aruba-central-gateway.service
+```
+
+If you prefer split mode, run `gateway` as a service and schedule sync with cron:
+
+```cron
+*/30 * * * * cd /opt/hpe-central-zabbix && /usr/bin/python3 ./central_gateway.py sync-zabbix --apply >> /var/log/hpe-aruba-central-sync.log 2>&1
+```
+
+## Updating
+
+To update an existing production installation:
+
+```bash
+cd /opt/hpe-central-zabbix
+git fetch --tags
+git pull
+python3 ./central_gateway.py config-check
+python3 ./central_gateway.py import-zabbix-template --apply
+sudo systemctl restart hpe-aruba-central-gateway.service
+```
+
+Check the running service:
+
+```bash
+sudo systemctl status hpe-aruba-central-gateway.service
+journalctl -u hpe-aruba-central-gateway.service -n 100 --no-pager
 ```
 
 ## Gateway Host Monitoring

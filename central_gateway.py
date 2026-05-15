@@ -16,10 +16,11 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.7"
+APP_VERSION = "2.0.8"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.7"
+TEMPLATE_VERSION = "2.0.8"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
+DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
 TENANTS_PATH = "/workspaces/v1/msp-tenants"
@@ -691,34 +692,95 @@ def template_names() -> list[str]:
     return re.findall(r"^\s+template:\s+(.+?)\s*$", source, flags=re.MULTILINE)
 
 
-def template_group_names() -> list[str]:
-    source = TEMPLATE_PATH.read_text(encoding="utf-8")
-    match = re.search(r"(?ms)^  template_groups:\n(?P<body>.*?)(?=^  templates:)", source)
-    if not match:
-        return []
-    return sorted(set(re.findall(r"^\s*-\s+uuid:.*?\n\s+name:\s+(.+?)\s*$", match.group("body"), flags=re.MULTILINE)))
+def yaml_scalar(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
 
 
-def missing_template_groups(config: dict[str, Any]) -> list[str]:
-    names = template_group_names()
+def zabbix_template_group(config: dict[str, Any]) -> str:
+    return str(config_section(config, "zabbix").get("template_group") or DEFAULT_TEMPLATE_GROUP)
+
+
+def template_group_records(config: dict[str, Any], names: list[str]) -> dict[str, dict[str, Any]]:
     if not names:
-        return []
-    groups = zabbix_api_call(config, "templategroup.get", {"output": ["groupid", "name"], "filter": {"name": names}})
-    existing = {str(group.get("name")) for group in groups or [] if isinstance(group, dict)}
-    return [name for name in names if name not in existing]
+        return {}
+    groups = zabbix_api_call(config, "templategroup.get", {"output": ["groupid", "uuid", "name"], "filter": {"name": names}})
+    return {str(group.get("name")): group for group in groups or [] if isinstance(group, dict)}
+
+
+def existing_template_groups(config: dict[str, Any], names: list[str]) -> dict[str, list[str]]:
+    if not names:
+        return {}
+    templates = zabbix_api_call(config, "template.get", {
+        "output": ["templateid", "host"],
+        "selectTemplateGroups": ["groupid", "name"],
+        "filter": {"host": names},
+    })
+    result: dict[str, list[str]] = {}
+    for template in templates or []:
+        if not isinstance(template, dict):
+            continue
+        groups = [
+            str(group.get("name"))
+            for group in template.get("templateGroups") or []
+            if isinstance(group, dict) and group.get("name")
+        ]
+        result[str(template.get("host"))] = groups
+    return result
+
+
+def render_template_group_header(records: dict[str, dict[str, Any]], names: list[str]) -> str:
+    lines = ["  template_groups:"]
+    for name in names:
+        uuid = str((records.get(name) or {}).get("uuid") or "c8bb804cfbbd4128975e12db65aa0687")
+        lines.append(f"  - uuid: {uuid}")
+        lines.append(f"    name: {yaml_scalar(name)}")
+    return "\n".join(lines) + "\n"
+
+
+def render_groups_block(names: list[str]) -> str:
+    return "    groups:\n" + "".join(f"    - name: {yaml_scalar(name)}\n" for name in names)
+
+
+def render_zabbix_template_source(config: dict[str, Any]) -> tuple[str, list[str]]:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    names = template_names()
+    configured_group = zabbix_template_group(config)
+    existing_groups = existing_template_groups(config, names)
+    all_group_names = sorted({configured_group, *(group for groups in existing_groups.values() for group in groups)})
+    records = template_group_records(config, all_group_names)
+    missing = [name for name in all_group_names if name not in records]
+    if missing:
+        raise ZabbixError(
+            "Missing Zabbix template group(s): "
+            + ", ".join(missing)
+            + ". Create them manually before importing. This importer does not create template groups."
+        )
+    source = re.sub(
+        r"(?ms)^  template_groups:\n.*?(?=^  templates:)",
+        render_template_group_header(records, all_group_names),
+        source,
+        count=1,
+    )
+
+    def replace_template_block(match: re.Match[str]) -> str:
+        block = match.group(0)
+        template_match = re.search(r"^\s+template:\s+(.+?)\s*$", block, flags=re.MULTILINE)
+        if not template_match:
+            return block
+        template = template_match.group(1)
+        groups = sorted({configured_group, *existing_groups.get(template, [])})
+        return re.sub(r"(?m)^    groups:\n(?:    - name: .+\n)+", render_groups_block(groups), block, count=1)
+
+    source = re.sub(r"(?ms)^  - uuid: .*?(?=^  - uuid: |\Z)", replace_template_block, source)
+    return source, all_group_names
 
 
 def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
-    result = {"apply": apply, "path": str(TEMPLATE_PATH), "templates": template_names(), "template_groups": template_group_names()}
+    result = {"apply": apply, "path": str(TEMPLATE_PATH), "templates": template_names(), "template_groups": [zabbix_template_group(config)]}
     if not apply:
         return result
-    missing_groups = missing_template_groups(config)
-    if missing_groups:
-        raise ZabbixError(
-            "Missing Zabbix template group(s): "
-            + ", ".join(missing_groups)
-            + ". Create them manually before importing. This importer does not create template groups."
-        )
+    source, groups = render_zabbix_template_source(config)
+    result["template_groups"] = groups
     zabbix_api_call(config, "configuration.import", {
         "format": "yaml",
         "rules": {
@@ -728,7 +790,7 @@ def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[
             "triggers": {"createMissing": True, "updateExisting": True},
             "valueMaps": {"createMissing": True, "updateExisting": True},
         },
-        "source": TEMPLATE_PATH.read_text(encoding="utf-8"),
+        "source": source,
     })
     result["imported"] = True
     return result
