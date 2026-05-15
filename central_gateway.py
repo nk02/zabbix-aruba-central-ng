@@ -15,9 +15,10 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.0-dev2"
+APP_VERSION = "2.0.0-dev3"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.0-dev2"
+TEMPLATE_VERSION = "2.0.0-dev3"
+GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
 TENANTS_PATH = "/workspaces/v1/msp-tenants"
@@ -208,6 +209,67 @@ def request_json(
     raise CentralError(f"Unable to call {url}")
 
 
+def request_text(url: str, timeout: int = 5) -> str:
+    req = Request(url, headers={"Accept": "text/plain"}, method="GET")
+    with urlopen(req, timeout=timeout) as response:
+        return response.read().decode("utf-8")
+
+
+def extract_python_constant(source: str, name: str) -> str | None:
+    match = re.search(rf"^{re.escape(name)}\s*=\s*['\"]([^'\"]+)['\"]", source, flags=re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def extract_template_version(source: str) -> str | None:
+    match = re.search(r"macro:\s*'\{\$CENTRAL\.TEMPLATE\.VERSION\}'\s*\n\s*value:\s*([^\s]+)", source)
+    if match:
+        return match.group(1).strip("'\"")
+    return None
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    parts = re.findall(r"\d+", value)
+    return tuple(int(part) for part in parts) if parts else (0,)
+
+
+def version_component(name: str, current: str, latest: str | None, error: str | None = None) -> dict[str, Any]:
+    if error:
+        return {"name": name, "current": current, "latest": latest or "", "status": "unknown", "error": error}
+    if not latest:
+        return {"name": name, "current": current, "latest": "", "status": "unknown"}
+    status = "outdated" if version_tuple(latest) > version_tuple(current) else "current"
+    return {"name": name, "current": current, "latest": latest, "status": status}
+
+
+def package_version_status(config: dict[str, Any]) -> dict[str, Any]:
+    gateway = config_section(config, "gateway")
+    if gateway.get("version_check_enabled") is False:
+        return {
+            "status": "disabled",
+            "app": version_component("gateway", APP_VERSION, None, "version check disabled"),
+            "template": version_component("template", TEMPLATE_VERSION, None, "version check disabled"),
+        }
+    ref = str(gateway.get("version_check_ref") or "development-v2")
+    base = str(gateway.get("version_check_base_url") or GITHUB_RAW_BASE_URL).rstrip("/")
+    result: dict[str, Any] = {"status": "current"}
+    try:
+        latest_app = extract_python_constant(request_text(f"{base}/{ref}/central_gateway.py"), "APP_VERSION")
+        result["app"] = version_component("gateway", APP_VERSION, latest_app)
+    except Exception as exc:
+        result["app"] = version_component("gateway", APP_VERSION, None, str(exc))
+    try:
+        latest_template = extract_template_version(request_text(f"{base}/{ref}/zabbix_template_hpe_aruba_central_new_ap_trapper.yaml"))
+        result["template"] = version_component("template", TEMPLATE_VERSION, latest_template)
+    except Exception as exc:
+        result["template"] = version_component("template", TEMPLATE_VERSION, None, str(exc))
+    components = (result["app"], result["template"])
+    if any(component["status"] == "outdated" for component in components):
+        result["status"] = "outdated"
+    elif any(component["status"] == "unknown" for component in components):
+        result["status"] = "unknown"
+    return result
+
+
 def workspace_token(config: dict[str, Any], workspace: dict[str, Any], force_refresh: bool = False) -> str:
     workspace_id = str(workspace["workspace_id"]).replace("-", "")
     client_id = str(workspace["client_id"])
@@ -284,6 +346,19 @@ def central_get(
         return request_json("GET", base_url + path, config, token=token, query=query)
 
 
+def central_get_optional(
+    config: dict[str, Any],
+    workspace: dict[str, Any],
+    tenant: dict[str, Any],
+    path: str,
+    query: dict[str, str | int] | None = None,
+) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None]:
+    try:
+        return central_get(config, workspace, tenant, path, query), None
+    except CentralError as exc:
+        return None, str(exc)
+
+
 def get_all_pages(
     config: dict[str, Any],
     workspace: dict[str, Any],
@@ -309,6 +384,19 @@ def get_all_pages(
         if not records or offset >= total:
             break
     return results
+
+
+def get_all_pages_optional(
+    config: dict[str, Any],
+    workspace: dict[str, Any],
+    tenant: dict[str, Any],
+    path: str,
+    query: dict[str, str | int] | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    try:
+        return get_all_pages(config, workspace, tenant, path, query), None
+    except CentralError as exc:
+        return [], str(exc)
 
 
 def tenant_name(raw: dict[str, Any]) -> str:
@@ -441,6 +529,27 @@ def mapping_for(workspace: dict[str, Any], tenant: dict[str, Any]) -> dict[str, 
     return {}
 
 
+def configured_device_types(workspace: dict[str, Any], tenant: dict[str, Any]) -> set[str]:
+    mapping = mapping_for(workspace, tenant)
+    raw = mapping.get("discover_devices") or workspace.get("discover_devices") or "all"
+    if isinstance(raw, str):
+        values = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    elif isinstance(raw, list):
+        values = [str(item).strip().lower() for item in raw if str(item).strip()]
+    else:
+        values = ["all"]
+    if not values or "all" in values:
+        return {"ap", "switch", "gateway"}
+    aliases = {
+        "aps": "ap",
+        "access_point": "ap",
+        "access_points": "ap",
+        "switches": "switch",
+        "gateways": "gateway",
+    }
+    return {aliases.get(value, value) for value in values if aliases.get(value, value) in {"ap", "switch", "gateway"}}
+
+
 def host_prefix(workspace: dict[str, Any], tenant: dict[str, Any]) -> str:
     mapping = mapping_for(workspace, tenant)
     return safe_name(str(mapping.get("host_prefix") or tenant.get("tenant_name") or workspace.get("name") or "Central"))
@@ -461,13 +570,14 @@ def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
     for workspace in config_list(config, "workspaces"):
         tenants = workspace_tenants(config, workspace)
         for tenant in tenants:
+            allowed_kinds = configured_device_types(workspace, tenant)
             discovered = get_all_pages(config, workspace, tenant, "/network-monitoring/v1/devices")
             seen: set[str] = set()
             for raw in discovered:
                 device = normalize_device(raw, workspace, tenant)
                 kind = device_kind(device)
                 serial = str(device.get("serial") or "")
-                if not kind or not serial or serial in seen:
+                if not kind or kind not in allowed_kinds or not serial or serial in seen:
                     continue
                 seen.add(serial)
                 prefix = host_prefix(workspace, tenant)
@@ -747,17 +857,79 @@ def device_path(kind: str, serial: str) -> str:
     if kind == "ap":
         return f"/network-monitoring/v1/aps/{quote(serial)}"
     if kind == "switch":
-        return f"/network-monitoring/v1/switches/{quote(serial)}"
+        return f"/network-monitoring/v1alpha1/switch/{quote(serial)}"
     if kind == "gateway":
         return f"/network-monitoring/v1/gateways/{quote(serial)}"
     raise CentralError(f"Unsupported device kind {kind}")
 
 
-def normalize_summary(kind: str, raw: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
+def list_items(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        for key in ("items", "data", "ports", "radios", "interfaces", "wlans"):
+            items = value.get(key)
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+    return []
+
+
+def is_down_status(value: Any) -> bool:
+    status = normalize_status(value)
+    return bool(status and status not in ("ONLINE", "OK"))
+
+
+def count_down(records: list[dict[str, Any]]) -> int:
+    count = 0
+    for record in records:
+        status = first_value(record, "status", "adminStatus", "operStatus", "linkStatus", "health")
+        if is_down_status(status):
+            count += 1
+    return count
+
+
+def sum_numeric_fields(records: list[dict[str, Any]], names: tuple[str, ...]) -> int:
+    total = 0
+    wanted = {name.lower() for name in names}
+    for record in records:
+        for key, value in record.items():
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if any(name in normalized for name in wanted):
+                try:
+                    total += int(float(value))
+                except (TypeError, ValueError):
+                    pass
+    return total
+
+
+def firmware_filter(serial: str) -> str:
+    return f"serialNumber eq '{serial}'"
+
+
+def firmware_summary(firmware: dict[str, Any] | list[dict[str, Any]] | None) -> dict[str, Any]:
+    items = list_items(firmware)
+    item = items[0] if items else firmware if isinstance(firmware, dict) else {}
+    if not isinstance(item, dict):
+        item = {}
+    return {
+        "software_version": first_value(item, "softwareVersion", "firmwareVersion"),
+        "recommended_version": first_value(item, "recommendedVersion", "recommendedFirmwareVersion"),
+        "upgrade_status": first_value(item, "upgradeStatus"),
+        "classification": first_value(item, "firmwareClassification"),
+        "last_upgraded_at": first_value(item, "lastUpgradedAt", "lastUpgradeAt", "lastUpgradedTime"),
+    }
+
+
+def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
+    raw = payload.get("details") if isinstance(payload.get("details"), dict) else payload
     data = raw.get("ap") if kind == "ap" and isinstance(raw.get("ap"), dict) else raw
     stats = data.get("apStats")
     first_stats = stats[0] if isinstance(stats, list) and stats and isinstance(stats[0], dict) else {}
-    return {
+    ports = list_items(payload.get("ports"))
+    radios = list_items(payload.get("radios"))
+    interfaces = list_items(payload.get("interfaces"))
+    firmware = firmware_summary(payload.get("firmware"))
+    summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
         "name": first_value(data, "deviceName", "name", "hostname") or device.get("host"),
@@ -773,7 +945,76 @@ def normalize_summary(kind: str, raw: dict[str, Any], device: dict[str, Any]) ->
         "cpu_utilization": first_stats.get("cpuUtilization") if kind == "ap" else data.get("cpuUtilization"),
         "memory_utilization": first_stats.get("memoryUtilization") if kind == "ap" else data.get("memoryUtilization"),
         "config_status": data.get("configStatus"),
+        "firmware_recommended_version": firmware.get("recommended_version"),
+        "firmware_upgrade_status": firmware.get("upgrade_status"),
+        "firmware_classification": firmware.get("classification"),
+        "firmware_last_upgraded_at": firmware.get("last_upgraded_at"),
+        "port_down_count": count_down(ports),
+        "radio_down_count": count_down(radios),
+        "interface_down_count": count_down(interfaces),
+        "crc_error_count": sum_numeric_fields(ports + interfaces, ("crc",)),
+        "drop_count": sum_numeric_fields(ports + interfaces, ("drop", "dropped")),
+        "error_count": sum_numeric_fields(ports + interfaces, ("error", "errors")),
     }
+    return summary
+
+
+def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
+    kind = str(device["kind"])
+    serial = str(device["serial"])
+    site_id = str(device["site_id"]) if device.get("site_id") else ""
+    query = {"site-id": site_id} if site_id else None
+    details, details_error = central_get_optional(config, workspace, tenant, device_path(kind, serial), query)
+    payload: dict[str, Any] = {"details": details or {}, "errors": {}}
+    if details_error:
+        payload["errors"]["details"] = details_error
+
+    firmware, firmware_error = central_get_optional(
+        config,
+        workspace,
+        tenant,
+        "/network-services/v1alpha1/firmware-details",
+        {"limit": 1000, "filter": firmware_filter(serial)},
+    )
+    payload["firmware"] = firmware or {}
+    if firmware_error:
+        payload["errors"]["firmware"] = firmware_error
+
+    if kind == "ap":
+        for name, path in {
+            "radios": f"/network-monitoring/v1/aps/{quote(serial)}/radios",
+            "ports": f"/network-monitoring/v1/aps/{quote(serial)}/ports",
+            "wlans": f"/network-monitoring/v1/aps/{quote(serial)}/wlans",
+        }.items():
+            value, error = central_get_optional(config, workspace, tenant, path, query)
+            payload[name] = value or {}
+            if error:
+                payload["errors"][name] = error
+    elif kind == "switch":
+        interfaces, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1alpha1/switch/{quote(serial)}/interfaces", query)
+        payload["interfaces"] = interfaces
+        if error:
+            payload["errors"]["interfaces"] = error
+        detail_data = payload["details"] if isinstance(payload.get("details"), dict) else {}
+        stack_id = first_value(detail_data, "stackId", "stack_id")
+        extra_paths = {
+            "hardware_trends": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/hardware-trends",
+            "lag_summary": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/lag-summary",
+            "vsx_detail": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/vsx",
+        }
+        if stack_id:
+            extra_paths["stack_members"] = f"/network-monitoring/v1alpha1/stack/{quote(str(stack_id))}/members"
+        for name, path in extra_paths.items():
+            value, endpoint_error = central_get_optional(config, workspace, tenant, path, query)
+            payload[name] = value or {}
+            if endpoint_error:
+                payload["errors"][name] = endpoint_error
+    elif kind == "gateway":
+        ports, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1/gateways/{quote(serial)}/ports", query)
+        payload["ports"] = ports
+        if error:
+            payload["errors"]["ports"] = error
+    return payload
 
 
 def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, dict[str, Any]]:
@@ -792,14 +1033,13 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
             return 200, body
     workspace = find_workspace(config, str(device["workspace_id"]))
     tenant = gateway_tenant_record(device)
-    query = {"site-id": str(device["site_id"])} if device.get("site_id") else None
     try:
-        raw = central_get(config, workspace, tenant, device_path(str(device["kind"]), str(device["serial"])), query)
+        payload = collect_device_payload(config, workspace, tenant, device)
         body = {
             "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
             "device": {k: v for k, v in device.items() if k != "central_base_url"},
-            "summary": normalize_summary(str(device["kind"]), raw, device),
-            "data": raw,
+            "summary": normalize_summary(str(device["kind"]), payload, device),
+            "data": payload,
         }
         with HTTP_CACHE_LOCK:
             HTTP_CACHE[cache_key] = {"fetched_at": utc_now(), "body": body}
@@ -814,14 +1054,64 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
 
 
+def context_for_site(config: dict[str, Any], site_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    state = load_gateway_state()
+    devices = state.get("devices") if isinstance(state.get("devices"), dict) else {}
+    for device in devices.values():
+        if isinstance(device, dict) and str(device.get("site_id") or "") == str(site_id):
+            workspace = find_workspace(config, str(device["workspace_id"]))
+            return workspace, gateway_tenant_record(device)
+    return None
+
+
+def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tuple[int, dict[str, Any]]:
+    context = context_for_site(config, site_id)
+    if not context:
+        return 404, {"gateway": {"status": "not_found"}, "error": f"Site {site_id} not found in gateway state"}
+    workspace, tenant = context
+    ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 300)
+    cache_key = f"site-health:{tenant['tenant_id']}:{site_id}"
+    with HTTP_CACHE_LOCK:
+        cached = HTTP_CACHE.get(cache_key)
+        if cached and utc_now() - int(cached.get("fetched_at") or 0) < ttl:
+            body = dict(cached["body"])
+            body["gateway"] = dict(body.get("gateway") or {}, cache="hit")
+            return 200, body
+    try:
+        data = central_get(config, workspace, tenant, f"/network-monitoring/v1alpha1/site-health/{quote(site_id)}")
+        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
+        with HTTP_CACHE_LOCK:
+            HTTP_CACHE[cache_key] = {"fetched_at": utc_now(), "body": body}
+        return 200, body
+    except Exception as exc:
+        return 502, {"gateway": {"status": "error"}, "error": str(exc)}
+
+
+def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str, query_params: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
+    context = context_for_site(config, site_id)
+    if not context:
+        return 404, {"gateway": {"status": "not_found"}, "error": f"Site {site_id} not found in gateway state"}
+    workspace, tenant = context
+    end_ms = int(time.time() * 1000)
+    start_ms = end_ms - int(query_params.get("window-ms", ["3600000"])[0])
+    field = query_params.get("field", ["topreasons"])[0]
+    params = {"site-id": site_id, "start-at": start_ms, "end-at": end_ms, "field": field}
+    try:
+        data = central_get(config, workspace, tenant, "/network-monitoring/v1/client-onboarding-stage/count", params)
+        return 200, {"gateway": {"status": "ok", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
+    except Exception as exc:
+        return 502, {"gateway": {"status": "error"}, "error": str(exc)}
+
+
 def gateway_health(config: dict[str, Any]) -> dict[str, Any]:
     state = load_gateway_state()
     devices = state.get("devices") if isinstance(state.get("devices"), dict) else {}
     return {
-        "gateway": {"status": "ok", "version": APP_VERSION, "time": iso_now()},
+        "gateway": {"status": "ok", "version": APP_VERSION, "template_version": TEMPLATE_VERSION, "time": iso_now()},
         "state": {"generated_at": state.get("generated_at"), "device_count": len(devices)},
         "cache": {"entries": len(HTTP_CACHE)},
         "rate_limit": {"per_second": int(config_section(config, "gateway").get("api_rate_limit_per_second") or 8)},
+        "package": package_version_status(config),
     }
 
 
@@ -850,6 +1140,16 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/v1/device/raw":
             key = parse_qs(parsed.query).get("key", [""])[0]
             status, body = gateway_response_for_device(self.config, key)
+            self.write_json(status, body)
+            return
+        match = re.match(r"^/api/v1/site/([^/]+)/health$", parsed.path)
+        if match:
+            status, body = gateway_response_for_site_health(self.config, unquote(match.group(1)))
+            self.write_json(status, body)
+            return
+        match = re.match(r"^/api/v1/site/([^/]+)/client-onboarding-stage/count$", parsed.path)
+        if match:
+            status, body = gateway_response_for_client_onboarding(self.config, unquote(match.group(1)), parse_qs(parsed.query))
             self.write_json(status, body)
             return
         self.write_json(404, {"gateway": {"status": "not_found"}, "error": "Unknown endpoint"})

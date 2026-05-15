@@ -7,6 +7,9 @@
     "api_rate_limit_per_second": 8,
     "api_retry_attempts": 3,
     "device_cache_ttl_seconds": 240,
+    "site_cache_ttl_seconds": 300,
+    "version_check_enabled": true,
+    "version_check_ref": "development-v2",
     "access_log": false
   },
   "sync": {
@@ -42,11 +45,13 @@
       "client_id": "client-id",
       "client_secret": "client-secret",
       "central_base_url": "https://de2.api.central.arubanetworks.com",
+      "discover_devices": "all",
       "tenant_allowlist": [],
       "tenant_mappings": [
         {
           "tenant_name": "Central tenant name",
-          "host_prefix": "CUSTOMER"
+          "host_prefix": "CUSTOMER",
+          "discover_devices": ["ap", "switch"]
         }
       ]
     },
@@ -57,8 +62,10 @@
       "client_id": "client-id",
       "client_secret": "client-secret",
       "central_base_url": "https://de2.api.central.arubanetworks.com",
+      "discover_devices": ["ap", "switch", "gateway"],
       "mapping": {
-        "host_prefix": "CUSTOMER"
+        "host_prefix": "CUSTOMER",
+        "discover_devices": "all"
       }
     }
   ]

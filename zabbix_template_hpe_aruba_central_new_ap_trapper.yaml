@@ -18,7 +18,7 @@ zabbix_export:
       value: 1m
       description: Gateway health polling interval.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.0-dev2
+      value: 2.0.0-dev3
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -72,6 +72,44 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.state.device_count
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: a83639c195f54c5584c3c0b471576a86
+      name: Gateway package status
+      type: DEPENDENT
+      key: central.gateway.package_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.package.status
+      master_item:
+        key: central.gateway.health.raw
+      triggers:
+      - uuid: a36f7f7145154f699adbfb5c0f126406
+        expression: last(/HPE Aruba Central NG - Gateway/central.gateway.package_status)="outdated"
+        name: 'HPE Central gateway: package update available'
+        priority: WARNING
+    - uuid: b1470eefeee14533bafe3b424ad2c94d
+      name: Gateway latest app version
+      type: DEPENDENT
+      key: central.gateway.app_latest_version
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.package.app.latest
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: 5cecb6e6bad64708a4fc732b3083b0be
+      name: Gateway latest template version
+      type: DEPENDENT
+      key: central.gateway.template_latest_version
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.package.template.latest
       master_item:
         key: central.gateway.health.raw
 
@@ -159,6 +197,67 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.uptime_seconds
+      master_item:
+        key: central.device.raw
+    - uuid: 92cd47b770da4fd6b7c582f8e93c2143
+      name: AP recommended firmware
+      type: DEPENDENT
+      key: central.device.firmware_recommended
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_recommended_version
+      master_item:
+        key: central.device.raw
+    - uuid: cf7f31ad5449491aad796c742b96c15a
+      name: AP firmware last upgraded
+      type: DEPENDENT
+      key: central.device.firmware_last_upgraded
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_last_upgraded_at
+      master_item:
+        key: central.device.raw
+    - uuid: 00ca760e1e084e3daf4ae9b8a85b7c73
+      name: AP radio down count
+      type: DEPENDENT
+      key: central.ap.radio_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.radio_down_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 53286e7531334cd981ce39ac8d04e98d
+        expression: last(/HPE Aruba Central NG - AP/central.ap.radio_down_count)>0
+          and last(/HPE Aruba Central NG - AP/central.device.status)="ONLINE"
+        name: 'AP {HOST.NAME}: one or more radios are down'
+        priority: AVERAGE
+    - uuid: 60b5f07f642d4170859605ca25d1f266
+      name: AP port down count
+      type: DEPENDENT
+      key: central.device.port_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.port_down_count
+      master_item:
+        key: central.device.raw
+    - uuid: 4761215301cb4f95838ab1b3070d4392
+      name: AP error count
+      type: DEPENDENT
+      key: central.device.error_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.error_count
       master_item:
         key: central.device.raw
     - uuid: 64a1300bed224c3698a7f7e99a8d8a3f
@@ -267,6 +366,73 @@ zabbix_export:
         - $.summary.uptime_seconds
       master_item:
         key: central.device.raw
+    - uuid: a233bb988b214077a92de9898c95358f
+      name: Switch recommended firmware
+      type: DEPENDENT
+      key: central.device.firmware_recommended
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_recommended_version
+      master_item:
+        key: central.device.raw
+    - uuid: ed08149b171c42b8b94f2319900fb9e1
+      name: Switch firmware last upgraded
+      type: DEPENDENT
+      key: central.device.firmware_last_upgraded
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_last_upgraded_at
+      master_item:
+        key: central.device.raw
+    - uuid: df908bf3935a4a8a83336ee80029daf9
+      name: Switch interface down count
+      type: DEPENDENT
+      key: central.switch.interface_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.interface_down_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 33064076cfb04408a331ac660917ca5f
+        expression: last(/HPE Aruba Central NG - Switch/central.switch.interface_down_count)>0
+        name: 'Switch {HOST.NAME}: one or more interfaces are down'
+        priority: INFO
+        status: DISABLED
+    - uuid: a73b7ffb99264164be0cd8b8910a5ae6
+      name: Switch CRC error count
+      type: DEPENDENT
+      key: central.switch.crc_error_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.crc_error_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 7695c1c3b794432290b0b87f3316e419
+        expression: change(/HPE Aruba Central NG - Switch/central.switch.crc_error_count)>100
+        name: 'Switch {HOST.NAME}: high CRC error increase'
+        priority: AVERAGE
+        status: DISABLED
+    - uuid: ff7d5477c461402abf01039c343db665
+      name: Switch packet drop count
+      type: DEPENDENT
+      key: central.switch.drop_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.drop_count
+      master_item:
+        key: central.device.raw
     - uuid: 1263604ff162424dbbe869d15ac918fa
       name: Switch config status
       type: DEPENDENT
@@ -326,3 +492,36 @@ zabbix_export:
         expression: last(/HPE Aruba Central NG - Gateway Device/central.device.status)<>"ONLINE"
         name: 'Gateway {HOST.NAME}: not online'
         priority: HIGH
+    - uuid: 8a052b3fd93c41a4a8450513097b2a84
+      name: Gateway recommended firmware
+      type: DEPENDENT
+      key: central.device.firmware_recommended
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_recommended_version
+      master_item:
+        key: central.device.raw
+    - uuid: 43f2db88b11946438bad2b011bd9fbdc
+      name: Gateway firmware last upgraded
+      type: DEPENDENT
+      key: central.device.firmware_last_upgraded
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_last_upgraded_at
+      master_item:
+        key: central.device.raw
+    - uuid: 41bd8b303d4c4baab002f37d148b8340
+      name: Gateway port down count
+      type: DEPENDENT
+      key: central.device.port_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.port_down_count
+      master_item:
+        key: central.device.raw
