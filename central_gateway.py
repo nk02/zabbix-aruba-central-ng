@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import ssl
 import sys
 import threading
 import time
@@ -15,9 +16,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.4"
+APP_VERSION = "2.0.5"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.4"
+TEMPLATE_VERSION = "2.0.5"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -88,6 +89,18 @@ def config_list(config: dict[str, Any], name: str) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def config_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
 
 
 def config_check(config: dict[str, Any]) -> dict[str, Any]:
@@ -641,21 +654,33 @@ def zabbix_config(config: dict[str, Any]) -> dict[str, Any]:
 
 def zabbix_api_call(config: dict[str, Any], method: str, params: dict[str, Any] | list[Any] | None = None) -> Any:
     zbx = zabbix_config(config)
+    api_url = str(zbx["api_url"])
+    ssl_context = None
+    if api_url.lower().startswith("https://"):
+        tls_verify = config_bool(zbx.get("tls_verify", zbx.get("verify_ssl")), True)
+        if tls_verify:
+            ca_file = zbx.get("tls_ca_file")
+            if ca_file:
+                ssl_context = ssl.create_default_context(cafile=str(ca_file))
+        else:
+            ssl_context = ssl._create_unverified_context()
     payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": 1}
     data = json.dumps(payload).encode("utf-8")
     req = Request(
-        str(zbx["api_url"]),
+        api_url,
         data=data,
         headers={"Accept": "application/json", "Content-Type": "application/json-rpc", "Authorization": f"Bearer {zbx['api_token']}"},
         method="POST",
     )
     try:
-        with urlopen(req, timeout=60) as response:
+        with urlopen(req, timeout=60, context=ssl_context) as response:
             body = response.read().decode("utf-8")
             result = json.loads(body) if body else {}
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise ZabbixError(f"Zabbix API HTTP {exc.code}: {body}") from exc
+    except URLError as exc:
+        raise ZabbixError(f"Zabbix API network error calling {api_url}: {exc.reason}") from exc
     if isinstance(result, dict) and result.get("error"):
         raise ZabbixError(f"Zabbix API {method} failed: {result['error']}")
     return result.get("result") if isinstance(result, dict) else result

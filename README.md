@@ -58,6 +58,12 @@ Copy the example:
 Copy-Item .\workspaces.example.json .\workspaces.json
 ```
 
+On Linux:
+
+```bash
+cp workspaces.example.json workspaces.json
+```
+
 Minimal structure:
 
 ```json
@@ -80,6 +86,7 @@ Minimal structure:
   "zabbix": {
     "api_url": "https://ip-or-fqdn-zabbixserver/api_jsonrpc.php",
     "api_token": "zabbix-api-token",
+    "tls_verify": true,
     "unmapped_host_group": "HPE Aruba Central/Unmapped",
     "gateway_host": "HPE Aruba Central Gateway",
     "auto_import_template": true
@@ -95,6 +102,9 @@ Important settings:
 - `gateway.device_cache_ttl_seconds`: cache TTL for device raw data.
 - `gateway.site_cache_ttl_seconds`: cache TTL for site health data.
 - `sync.interval_seconds`: used by the combined `run` command for periodic Zabbix sync.
+- `zabbix.api_url`: Zabbix API endpoint. Use `http://127.0.0.1/api_jsonrpc.php` when the gateway runs on the same Zabbix VM and you want local clear-text API access.
+- `zabbix.tls_verify`: verifies the Zabbix API HTTPS certificate. Default is `true`; set to `false` only for trusted internal endpoints.
+- `zabbix.tls_ca_file`: optional path to a custom CA bundle for the Zabbix API HTTPS certificate.
 - `zabbix.unmapped_host_group`: landing host group for new managed hosts.
 - `zabbix.gateway_host`: Zabbix host used for gateway health.
 
@@ -154,16 +164,34 @@ Validate configuration:
 python .\central_gateway.py config-check
 ```
 
+Linux:
+
+```bash
+python3 ./central_gateway.py config-check
+```
+
 Preview template import:
 
 ```powershell
 python .\central_gateway.py import-zabbix-template
 ```
 
+Linux:
+
+```bash
+python3 ./central_gateway.py import-zabbix-template
+```
+
 Apply template import:
 
 ```powershell
 python .\central_gateway.py import-zabbix-template --apply
+```
+
+Linux:
+
+```bash
+python3 ./central_gateway.py import-zabbix-template --apply
 ```
 
 Preview Zabbix synchronization:
@@ -178,6 +206,12 @@ Apply Zabbix synchronization:
 python .\central_gateway.py sync-zabbix --apply
 ```
 
+Linux:
+
+```bash
+python3 ./central_gateway.py sync-zabbix --apply
+```
+
 Start only the gateway:
 
 ```powershell
@@ -188,6 +222,12 @@ Start gateway and run periodic sync in the same process:
 
 ```powershell
 python .\central_gateway.py run
+```
+
+Linux:
+
+```bash
+python3 ./central_gateway.py run
 ```
 
 ## Gateway Endpoints

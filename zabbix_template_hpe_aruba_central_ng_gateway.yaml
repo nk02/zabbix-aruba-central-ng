@@ -21,7 +21,7 @@ zabbix_export:
       value: '7200'
       description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.4
+      value: 2.0.5
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248

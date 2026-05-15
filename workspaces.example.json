@@ -18,6 +18,7 @@
   "zabbix": {
     "api_url": "https://ip-or-fqdn-zabbixserver/api_jsonrpc.php",
     "api_token": "zabbix-api-token",
+    "tls_verify": true,
     "unmapped_host_group": "HPE Aruba Central/Unmapped",
     "gateway_host": "HPE Aruba Central Gateway",
     "auto_import_template": true,
