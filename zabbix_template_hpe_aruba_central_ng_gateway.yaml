@@ -11,9 +11,6 @@ zabbix_export:
     groups:
     - name: Templates/Network devices
     macros:
-    - macro: '{$CENTRAL.GATEWAY.URL}'
-      value: http://127.0.0.1:8080
-      description: Base URL of the local Central gateway/cache service.
     - macro: '{$CENTRAL.GATEWAY.POLL_INTERVAL}'
       value: 1m
       description: Gateway health polling interval.
@@ -24,7 +21,7 @@ zabbix_export:
       value: '7200'
       description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.2
+      value: 2.0.3
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -199,10 +196,6 @@ zabbix_export:
     groups:
     - name: Templates/Network devices
     macros:
-    - macro: '{$CENTRAL.GATEWAY.URL}'
-      value: http://127.0.0.1:8080
-    - macro: '{$CENTRAL.SITE.ID}'
-      value: ''
     - macro: '{$CENTRAL.SITE.POLL_INTERVAL}'
       value: 5m
     - macro: '{$CENTRAL.SITE.ONBOARDING.POLL_INTERVAL}'
@@ -322,10 +315,6 @@ zabbix_export:
     groups:
     - name: Templates/Network devices
     macros:
-    - macro: '{$CENTRAL.GATEWAY.URL}'
-      value: http://127.0.0.1:8080
-    - macro: '{$CENTRAL.DEVICE.KEY}'
-      value: ''
     - macro: '{$CENTRAL.AP.POLL_INTERVAL}'
       value: 5m
     items:
@@ -494,10 +483,6 @@ zabbix_export:
     groups:
     - name: Templates/Network devices
     macros:
-    - macro: '{$CENTRAL.GATEWAY.URL}'
-      value: http://127.0.0.1:8080
-    - macro: '{$CENTRAL.DEVICE.KEY}'
-      value: ''
     - macro: '{$CENTRAL.SWITCH.POLL_INTERVAL}'
       value: 5m
     items:
@@ -654,10 +639,6 @@ zabbix_export:
     groups:
     - name: Templates/Network devices
     macros:
-    - macro: '{$CENTRAL.GATEWAY.URL}'
-      value: http://127.0.0.1:8080
-    - macro: '{$CENTRAL.DEVICE.KEY}'
-      value: ''
     - macro: '{$CENTRAL.GATEWAY.DEVICE.POLL_INTERVAL}'
       value: 5m
     items:

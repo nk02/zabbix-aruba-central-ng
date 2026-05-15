@@ -15,9 +15,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.2"
+TEMPLATE_VERSION = "2.0.3"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
