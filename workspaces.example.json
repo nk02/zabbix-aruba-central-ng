@@ -1,14 +1,23 @@
 {
-  "config_version": "1.0.4",
+  "config_version": "2.0.0",
+  "gateway": {
+    "listen": "0.0.0.0",
+    "port": 8080,
+    "base_url": "http://collector-server.example.com:8080",
+    "api_rate_limit_per_second": 8,
+    "api_retry_attempts": 3,
+    "device_cache_ttl_seconds": 240,
+    "access_log": false
+  },
+  "sync": {
+    "interval_seconds": 1800
+  },
   "zabbix": {
-    "server": "zabbix.example.com",
-    "port": "10051",
-    "collector_host": "HPE Aruba Central Collector",
-    "sender_path": "zabbix_sender",
     "api_url": "https://zabbix.example.com/api_jsonrpc.php",
     "api_token": "zabbix-api-token",
     "unmapped_host_group": "HPE Aruba Central/Unmapped",
-    "host_name_prefix": "",
+    "gateway_host": "HPE Aruba Central Gateway",
+    "auto_import_template": true,
     "managed_tag": {
       "tag": "hpe-aruba-central-ng",
       "value": ""
@@ -19,23 +28,11 @@
       "gateway": "Gateway"
     },
     "templates": {
-      "collector": "HPE Aruba Central NG - Collector",
-      "site": "HPE Aruba Central NG - Site",
+      "collector": "HPE Aruba Central NG - Gateway",
       "ap": "HPE Aruba Central NG - AP",
       "switch": "HPE Aruba Central NG - Switch",
-      "gateway": "HPE Aruba Central NG - Gateway"
+      "gateway": "HPE Aruba Central NG - Gateway Device"
     }
-  },
-  "collector": {
-    "interval_seconds": 300,
-    "collect_client_counts": false,
-    "auto_import_template": true,
-    "api_workers": 4,
-    "api_rate_limit_per_second": 8,
-    "lld_settle_seconds": 10,
-    "version_check_enabled": true,
-    "version_check_base_url": "https://api.github.com/repos/nk02/zabbix-aruba-central-ng/contents",
-    "version_check_ref": "main"
   },
   "workspaces": [
     {

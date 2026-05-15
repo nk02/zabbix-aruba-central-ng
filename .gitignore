@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 .venv/
 .token_cache.json
+gateway_state.json
 zabbix_sender.exe
