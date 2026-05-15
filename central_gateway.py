@@ -15,9 +15,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.0-dev4"
+APP_VERSION = "2.0.1"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.0-dev4"
+TEMPLATE_VERSION = "2.0.1"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -52,6 +52,18 @@ def utc_now() -> int:
 
 def iso_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def iso_age_seconds(value: Any, default: int = 999999999) -> int:
+    if not isinstance(value, str) or not value:
+        return default
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return default
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0, int(time.time() - parsed.timestamp()))
 
 
 def load_json_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
@@ -1148,9 +1160,10 @@ def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str,
 def gateway_health(config: dict[str, Any]) -> dict[str, Any]:
     state = load_gateway_state()
     devices = state.get("devices") if isinstance(state.get("devices"), dict) else {}
+    generated_at = state.get("generated_at")
     return {
         "gateway": {"status": "ok", "version": APP_VERSION, "template_version": TEMPLATE_VERSION, "time": iso_now()},
-        "state": {"generated_at": state.get("generated_at"), "device_count": len(devices)},
+        "state": {"generated_at": generated_at, "generated_at_age_seconds": iso_age_seconds(generated_at), "device_count": len(devices)},
         "cache": {"entries": len(HTTP_CACHE)},
         "rate_limit": {"per_second": int(config_section(config, "gateway").get("api_rate_limit_per_second") or 8)},
         "package": package_version_status(config),
@@ -1170,26 +1183,26 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
-        if parsed.path == "/api/v1/health":
+        if parsed.path == "/api/v2/health":
             self.write_json(200, gateway_health(self.config))
             return
-        match = re.match(r"^/api/v1/device/([^/]+)/raw$", parsed.path)
+        match = re.match(r"^/api/v2/device/([^/]+)/raw$", parsed.path)
         if match:
             key = unquote(match.group(1))
             status, body = gateway_response_for_device(self.config, key)
             self.write_json(status, body)
             return
-        if parsed.path == "/api/v1/device/raw":
+        if parsed.path == "/api/v2/device/raw":
             key = parse_qs(parsed.query).get("key", [""])[0]
             status, body = gateway_response_for_device(self.config, key)
             self.write_json(status, body)
             return
-        match = re.match(r"^/api/v1/site/([^/]+)/health$", parsed.path)
+        match = re.match(r"^/api/v2/site/([^/]+)/health$", parsed.path)
         if match:
             status, body = gateway_response_for_site_health(self.config, unquote(match.group(1)))
             self.write_json(status, body)
             return
-        match = re.match(r"^/api/v1/site/([^/]+)/client-onboarding-stage/count$", parsed.path)
+        match = re.match(r"^/api/v2/site/([^/]+)/client-onboarding-stage/count$", parsed.path)
         if match:
             status, body = gateway_response_for_client_onboarding(self.config, unquote(match.group(1)), parse_qs(parsed.query))
             self.write_json(status, body)

@@ -17,8 +17,11 @@ zabbix_export:
     - macro: '{$CENTRAL.GATEWAY.POLL_INTERVAL}'
       value: 1m
       description: Gateway health polling interval.
+    - macro: '{$CENTRAL.SYNC.MAX_AGE_SECONDS}'
+      value: '7200'
+      description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.0-dev4
+      value: 2.0.1
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -29,7 +32,7 @@ zabbix_export:
       history: '0'
       trends: '0'
       value_type: TEXT
-      url: '{$CENTRAL.GATEWAY.URL}/api/v1/health'
+      url: '{$CENTRAL.GATEWAY.URL}/api/v2/health'
       request_method: GET
       timeout: 10s
       status_codes: '200'
@@ -72,6 +75,46 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.state.device_count
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: 3952ec5d581a450eaebe242c46060436
+      name: Gateway last sync age
+      type: DEPENDENT
+      key: central.gateway.sync_state_age_seconds
+      value_type: UNSIGNED
+      units: s
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.state.generated_at_age_seconds
+      master_item:
+        key: central.gateway.health.raw
+      triggers:
+      - uuid: 3b1829ded38046a197f884c25f6c1431
+        expression: last(/HPE Aruba Central NG - Gateway/central.gateway.sync_state_age_seconds)>{$CENTRAL.SYNC.MAX_AGE_SECONDS}
+        name: 'HPE Central gateway: Zabbix sync state is stale'
+        priority: HIGH
+    - uuid: d631233083364f6f8fe40f2b642535fc
+      name: Gateway cache entries
+      type: DEPENDENT
+      key: central.gateway.cache_entries
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.cache.entries
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: 3c1919f2ffb149259b847f1161e5c14b
+      name: Gateway API rate limit
+      type: DEPENDENT
+      key: central.gateway.rate_limit_per_second
+      value_type: UNSIGNED
+      units: req/s
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.rate_limit.per_second
       master_item:
         key: central.gateway.health.raw
     - uuid: a83639c195f54c5584c3c0b471576a86
@@ -139,7 +182,7 @@ zabbix_export:
       trends: '0'
       value_type: TEXT
       description: Master HTTP item used by dependent site health items.
-      url: '{$CENTRAL.GATEWAY.URL}/api/v1/site/{$CENTRAL.SITE.ID}/health'
+      url: '{$CENTRAL.GATEWAY.URL}/api/v2/site/{$CENTRAL.SITE.ID}/health'
       request_method: GET
       timeout: 20s
       status_codes: '200'
@@ -212,7 +255,7 @@ zabbix_export:
       trends: '0'
       value_type: TEXT
       description: Master HTTP item used by dependent client onboarding items.
-      url: '{$CENTRAL.GATEWAY.URL}/api/v1/site/{$CENTRAL.SITE.ID}/client-onboarding-stage/count?field=topreasons&window-ms=3600000'
+      url: '{$CENTRAL.GATEWAY.URL}/api/v2/site/{$CENTRAL.SITE.ID}/client-onboarding-stage/count?field=topreasons&window-ms=3600000'
       request_method: GET
       timeout: 20s
       status_codes: '200'
@@ -261,7 +304,7 @@ zabbix_export:
       value_type: TEXT
       description: Master HTTP item used by dependent items. History is disabled
         intentionally.
-      url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
+      url: '{$CENTRAL.GATEWAY.URL}/api/v2/device/{$CENTRAL.DEVICE.KEY}/raw'
       request_method: GET
       timeout: 20s
       status_codes: '200'
@@ -433,7 +476,7 @@ zabbix_export:
       value_type: TEXT
       description: Master HTTP item used by dependent items. History is disabled
         intentionally.
-      url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
+      url: '{$CENTRAL.GATEWAY.URL}/api/v2/device/{$CENTRAL.DEVICE.KEY}/raw'
       request_method: GET
       timeout: 20s
       status_codes: '200'
@@ -593,7 +636,7 @@ zabbix_export:
       value_type: TEXT
       description: Master HTTP item used by dependent items. History is disabled
         intentionally.
-      url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
+      url: '{$CENTRAL.GATEWAY.URL}/api/v2/device/{$CENTRAL.DEVICE.KEY}/raw'
       request_method: GET
       timeout: 20s
       status_codes: '200'
