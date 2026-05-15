@@ -561,7 +561,7 @@ def device_host_name(prefix: str, device: dict[str, Any]) -> str:
 
 def site_host_name(prefix: str, site_name: Any, site_id: Any) -> str:
     name = str(site_name or "").strip() or f"Site {site_id}"
-    return safe_name(f"{prefix} - {name}")
+    return safe_name(f"{prefix} - GLOBAL SITE - {name}")
 
 
 def device_key(workspace: dict[str, Any], tenant: dict[str, Any], kind: str, serial: str) -> str:
@@ -735,6 +735,25 @@ def zabbix_host(config: dict[str, Any], host: str) -> dict[str, Any] | None:
     return hosts[0] if isinstance(hosts, list) and hosts else None
 
 
+def zabbix_managed_site_host(config: dict[str, Any], site_id: str) -> dict[str, Any] | None:
+    tag = managed_tag(config)
+    hosts = zabbix_api_call(config, "host.get", {
+        "output": ["hostid", "host", "name"],
+        "selectTags": "extend",
+        "selectMacros": "extend",
+        "selectParentTemplates": ["templateid", "host"],
+    })
+    if not isinstance(hosts, list):
+        return None
+    for host in hosts:
+        if not isinstance(host, dict) or not host_has_tag(host.get("tags") or [], tag):
+            continue
+        for macro in host.get("macros") or []:
+            if isinstance(macro, dict) and macro.get("macro") == "{$CENTRAL.SITE.ID}" and str(macro.get("value") or "") == site_id:
+                return host
+    return None
+
+
 def merge_macros(existing: list[dict[str, Any]], desired: dict[str, str]) -> list[dict[str, str]]:
     managed_names = set(desired)
     merged = [
@@ -751,6 +770,8 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
     group_name = str(zbx.get("unmapped_host_group") or "HPE Aruba Central/Unmapped")
     groupid = hostgroup_id(config, group_name, apply)
     existing = zabbix_host(config, str(plan["host"]))
+    if not existing and plan.get("site_id"):
+        existing = zabbix_managed_site_host(config, str(plan["site_id"]))
     tag = managed_tag(config)
     tags = host_tags(config, str(plan["kind"])) + [tag]
     result = {"host": plan["host"], "kind": plan["kind"], "exists": bool(existing), "created": False, "updated": False}
@@ -774,6 +795,7 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
             raise ZabbixError(f"Existing host {plan['host']!r} is not managed by this integration")
         params: dict[str, Any] = {
             "hostid": existing["hostid"],
+            "host": plan["host"],
             "name": plan.get("visible_name") or plan["host"],
             "tags": tags,
             "macros": merge_macros(existing.get("macros") or [], macros),
