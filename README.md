@@ -377,7 +377,20 @@ Adjust paths to match the actual Python installation and project directory.
 
 Create a dedicated user and install the project under a stable directory, for example `/opt/hpe-central-zabbix`.
 
-Example systemd unit:
+Create the service user if needed:
+
+```bash
+sudo useradd --system --home /opt/hpe-central-zabbix --shell /usr/sbin/nologin zabbix-gateway
+sudo chown -R zabbix-gateway:zabbix-gateway /opt/hpe-central-zabbix
+```
+
+Create the systemd unit here:
+
+```bash
+sudo nano /etc/systemd/system/hpe-aruba-central-gateway.service
+```
+
+Unit content:
 
 ```ini
 [Unit]
@@ -397,12 +410,20 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-Enable it:
+Enable and start it:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now hpe-aruba-central-gateway.service
+sudo systemctl enable hpe-aruba-central-gateway.service
+sudo systemctl start hpe-aruba-central-gateway.service
 sudo systemctl status hpe-aruba-central-gateway.service
+```
+
+If it does not start, check the effective user, paths, and logs:
+
+```bash
+sudo -u zabbix-gateway /usr/bin/python3 /opt/hpe-central-zabbix/central_gateway.py config-check
+sudo journalctl -u hpe-aruba-central-gateway.service -n 100 --no-pager
 ```
 
 If you prefer split mode, run `gateway` as a service and schedule sync with cron:
