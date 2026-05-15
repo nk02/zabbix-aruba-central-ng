@@ -16,9 +16,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.8"
+APP_VERSION = "2.0.9"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.8"
+TEMPLATE_VERSION = "2.0.9"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -719,9 +719,10 @@ def existing_template_groups(config: dict[str, Any], names: list[str]) -> dict[s
     for template in templates or []:
         if not isinstance(template, dict):
             continue
+        groups_payload = template.get("templategroups") or template.get("templateGroups") or []
         groups = [
             str(group.get("name"))
-            for group in template.get("templateGroups") or []
+            for group in groups_payload
             if isinstance(group, dict) and group.get("name")
         ]
         result[str(template.get("host"))] = groups
