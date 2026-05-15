@@ -16,9 +16,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.6"
+APP_VERSION = "2.0.7"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.6"
+TEMPLATE_VERSION = "2.0.7"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -691,10 +691,34 @@ def template_names() -> list[str]:
     return re.findall(r"^\s+template:\s+(.+?)\s*$", source, flags=re.MULTILINE)
 
 
+def template_group_names() -> list[str]:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^  template_groups:\n(?P<body>.*?)(?=^  templates:)", source)
+    if not match:
+        return []
+    return sorted(set(re.findall(r"^\s*-\s+uuid:.*?\n\s+name:\s+(.+?)\s*$", match.group("body"), flags=re.MULTILINE)))
+
+
+def missing_template_groups(config: dict[str, Any]) -> list[str]:
+    names = template_group_names()
+    if not names:
+        return []
+    groups = zabbix_api_call(config, "templategroup.get", {"output": ["groupid", "name"], "filter": {"name": names}})
+    existing = {str(group.get("name")) for group in groups or [] if isinstance(group, dict)}
+    return [name for name in names if name not in existing]
+
+
 def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
-    result = {"apply": apply, "path": str(TEMPLATE_PATH), "templates": template_names()}
+    result = {"apply": apply, "path": str(TEMPLATE_PATH), "templates": template_names(), "template_groups": template_group_names()}
     if not apply:
         return result
+    missing_groups = missing_template_groups(config)
+    if missing_groups:
+        raise ZabbixError(
+            "Missing Zabbix template group(s): "
+            + ", ".join(missing_groups)
+            + ". Create them manually before importing. This importer does not create template groups."
+        )
     zabbix_api_call(config, "configuration.import", {
         "format": "yaml",
         "rules": {

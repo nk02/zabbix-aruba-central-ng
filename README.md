@@ -117,6 +117,7 @@ configuration.import
 hostgroup.get
 hostgroup.create
 template.get
+templategroup.get
 host.get
 host.create
 host.update
@@ -130,7 +131,7 @@ The user group should have read-write permissions on:
 - any host group where managed hosts will be moved later, or a shared technical group that remains on every managed host;
 - the template group `Templates/Network devices`.
 
-The template group must already exist. The importer does not create template groups because Zabbix can require Super Admin privileges for template group creation/update checks, especially on built-in groups.
+The bundled template uses the template group `Templates/Network devices`. This group usually already exists on Zabbix 7 installations. The importer checks that it exists, but it does not create template groups because Zabbix can require Super Admin privileges for template group creation/update checks, especially on built-in groups. If the group is missing, create it manually before running `import-zabbix-template --apply`.
 
 Host tags are configurable:
 
