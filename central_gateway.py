@@ -15,9 +15,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.1"
+TEMPLATE_VERSION = "2.0.2"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -704,6 +704,11 @@ def template_ids(config: dict[str, Any], names: list[str]) -> list[dict[str, str
     return [{"templateid": str(by_name[name])} for name in names]
 
 
+def template_id_map(config: dict[str, Any], names: list[str]) -> dict[str, str]:
+    templates = zabbix_api_call(config, "template.get", {"output": ["templateid", "host"], "filter": {"host": names}})
+    return {str(item["host"]): str(item["templateid"]) for item in templates or [] if isinstance(item, dict)}
+
+
 def managed_tag(config: dict[str, Any]) -> dict[str, str]:
     tag = config_section(config, "zabbix").get("managed_tag")
     if isinstance(tag, dict) and tag.get("tag"):
@@ -726,9 +731,9 @@ def zabbix_templates(config: dict[str, Any]) -> dict[str, str]:
     return {
         "service": str(templates.get("service") or "HPE Aruba Central NG - Gateway"),
         "site": str(templates.get("site") or "HPE Aruba Central NG - Site"),
-        "ap": str(templates.get("ap") or "HPE Aruba Central NG - AP"),
-        "switch": str(templates.get("switch") or "HPE Aruba Central NG - Switch"),
-        "gateway": str(templates.get("gateway") or "HPE Aruba Central NG - Gateway Device"),
+        "ap": str(templates.get("ap") or "HPE Aruba Central NG - DeviceType AP"),
+        "switch": str(templates.get("switch") or "HPE Aruba Central NG - DeviceType Switch"),
+        "gateway": str(templates.get("gateway") or "HPE Aruba Central NG - DeviceType Gateway"),
     }
 
 
@@ -766,6 +771,44 @@ def zabbix_managed_site_host(config: dict[str, Any], site_id: str) -> dict[str, 
     return None
 
 
+def zabbix_managed_device_host(config: dict[str, Any], device_key: str) -> dict[str, Any] | None:
+    tag = managed_tag(config)
+    hosts = zabbix_api_call(config, "host.get", {
+        "output": ["hostid", "host", "name"],
+        "selectTags": "extend",
+        "selectMacros": "extend",
+        "selectParentTemplates": ["templateid", "host"],
+    })
+    if not isinstance(hosts, list):
+        return None
+    for host in hosts:
+        if not isinstance(host, dict) or not host_has_tag(host.get("tags") or [], tag):
+            continue
+        for macro in host.get("macros") or []:
+            if isinstance(macro, dict) and macro.get("macro") == "{$CENTRAL.DEVICE.KEY}" and str(macro.get("value") or "") == device_key:
+                return host
+    return None
+
+
+def managed_zabbix_hosts(config: dict[str, Any]) -> list[dict[str, Any]]:
+    tag = managed_tag(config)
+    hosts = zabbix_api_call(config, "host.get", {
+        "output": ["hostid", "host", "name"],
+        "selectTags": "extend",
+        "selectMacros": "extend",
+    })
+    if not isinstance(hosts, list):
+        return []
+    return [host for host in hosts if isinstance(host, dict) and host_has_tag(host.get("tags") or [], tag)]
+
+
+def macro_value(host: dict[str, Any], name: str) -> str:
+    for macro in host.get("macros") or []:
+        if isinstance(macro, dict) and macro.get("macro") == name:
+            return str(macro.get("value") or "")
+    return ""
+
+
 def merge_macros(existing: list[dict[str, Any]], desired: dict[str, str]) -> list[dict[str, str]]:
     managed_names = set(desired)
     merged = [
@@ -782,6 +825,8 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
     group_name = str(zbx.get("unmapped_host_group") or "HPE Aruba Central/Unmapped")
     groupid = hostgroup_id(config, group_name, apply)
     existing = zabbix_host(config, str(plan["host"]))
+    if not existing and plan.get("device_key"):
+        existing = zabbix_managed_device_host(config, str(plan["device_key"]))
     if not existing and plan.get("site_id"):
         existing = zabbix_managed_site_host(config, str(plan["site_id"]))
     tag = managed_tag(config)
@@ -805,6 +850,12 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
     if existing:
         if not host_has_tag(existing.get("tags") or [], tag):
             raise ZabbixError(f"Existing host {plan['host']!r} is not managed by this integration")
+        known_templates = list(zabbix_templates(config).values()) + [
+            "HPE Aruba Central NG - AP",
+            "HPE Aruba Central NG - Switch",
+            "HPE Aruba Central NG - Gateway Device",
+        ]
+        managed_template_ids = set(template_id_map(config, sorted(set(known_templates))).values())
         params: dict[str, Any] = {
             "hostid": existing["hostid"],
             "host": plan["host"],
@@ -812,7 +863,11 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
             "tags": tags,
             "macros": merge_macros(existing.get("macros") or [], macros),
         }
-        current_template_ids = {str(item.get("templateid")) for item in existing.get("parentTemplates") or []}
+        current_template_ids = {
+            str(item.get("templateid"))
+            for item in existing.get("parentTemplates") or []
+            if str(item.get("templateid")) not in managed_template_ids
+        }
         for template in templates:
             current_template_ids.add(template["templateid"])
         params["templates"] = [{"templateid": templateid} for templateid in sorted(current_template_ids)]
@@ -867,14 +922,40 @@ def build_host_plans(config: dict[str, Any], devices: list[dict[str, Any]]) -> l
     return sorted(plans, key=lambda item: str(item["host"]))
 
 
+def stale_managed_hosts(config: dict[str, Any], plans: list[dict[str, Any]]) -> list[str]:
+    desired_device_keys = {str(plan.get("device_key")) for plan in plans if plan.get("device_key")}
+    desired_site_ids = {str(plan.get("site_id")) for plan in plans if plan.get("site_id")}
+    desired_hosts = {str(plan.get("host")) for plan in plans if plan.get("host")}
+    stale: list[str] = []
+    for host in managed_zabbix_hosts(config):
+        name = str(host.get("host") or host.get("name") or host.get("hostid"))
+        device_key = macro_value(host, "{$CENTRAL.DEVICE.KEY}")
+        site_id = macro_value(host, "{$CENTRAL.SITE.ID}")
+        if device_key:
+            if device_key not in desired_device_keys:
+                stale.append(name)
+        elif site_id:
+            if site_id not in desired_site_ids:
+                stale.append(name)
+        elif name not in desired_hosts:
+            stale.append(name)
+    return sorted(set(stale))
+
+
 def sync_zabbix(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
     if config_section(config, "zabbix").get("auto_import_template", True):
         import_result = import_zabbix_template(config, apply=apply)
     else:
         import_result = {"status": "disabled"}
     devices, state = discover_devices(config)
-    save_gateway_state(state)
     plans = build_host_plans(config, devices)
+    stale_hosts = stale_managed_hosts(config, plans) if apply else []
+    state["zabbix"] = {
+        "stale_managed_host_count": len(stale_hosts),
+        "stale_managed_host_names": ", ".join(stale_hosts),
+        "stale_managed_hosts": stale_hosts,
+    }
+    save_gateway_state(state)
     results = [ensure_host(config, plan, apply) for plan in plans]
     return {
         "apply": apply,
@@ -1160,10 +1241,15 @@ def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str,
 def gateway_health(config: dict[str, Any]) -> dict[str, Any]:
     state = load_gateway_state()
     devices = state.get("devices") if isinstance(state.get("devices"), dict) else {}
+    zabbix = state.get("zabbix") if isinstance(state.get("zabbix"), dict) else {}
     generated_at = state.get("generated_at")
     return {
         "gateway": {"status": "ok", "version": APP_VERSION, "template_version": TEMPLATE_VERSION, "time": iso_now()},
         "state": {"generated_at": generated_at, "generated_at_age_seconds": iso_age_seconds(generated_at), "device_count": len(devices)},
+        "zabbix": {
+            "stale_managed_host_count": int(zabbix.get("stale_managed_host_count") or 0),
+            "stale_managed_host_names": str(zabbix.get("stale_managed_host_names") or ""),
+        },
         "cache": {"entries": len(HTTP_CACHE)},
         "rate_limit": {"per_second": int(config_section(config, "gateway").get("api_rate_limit_per_second") or 8)},
         "package": package_version_status(config),

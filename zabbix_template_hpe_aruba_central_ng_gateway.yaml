@@ -17,11 +17,14 @@ zabbix_export:
     - macro: '{$CENTRAL.GATEWAY.POLL_INTERVAL}'
       value: 1m
       description: Gateway health polling interval.
+    - macro: '{$CENTRAL.GATEWAY.NODATA}'
+      value: 10m
+      description: Time without gateway health data before raising an alert.
     - macro: '{$CENTRAL.SYNC.MAX_AGE_SECONDS}'
       value: '7200'
       description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.1
+      value: 2.0.2
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -29,7 +32,7 @@ zabbix_export:
       type: HTTP_AGENT
       key: central.gateway.health.raw
       delay: '{$CENTRAL.GATEWAY.POLL_INTERVAL}'
-      history: '0'
+      history: 1d
       trends: '0'
       value_type: TEXT
       url: '{$CENTRAL.GATEWAY.URL}/api/v2/health'
@@ -39,6 +42,11 @@ zabbix_export:
       tags:
       - tag: component
         value: gateway
+      triggers:
+      - uuid: 5ef684a140614c36bb6d1ecf1c96ddfc
+        expression: nodata(/HPE Aruba Central NG - Gateway/central.gateway.health.raw,{$CENTRAL.GATEWAY.NODATA})=1
+        name: 'HPE Central gateway: no health data received'
+        priority: HIGH
     - uuid: c5197dad779b4a48a6da2e1918b3238a
       name: Gateway status
       type: DEPENDENT
@@ -77,6 +85,33 @@ zabbix_export:
         - $.state.device_count
       master_item:
         key: central.gateway.health.raw
+    - uuid: b8b193cb63534b81849d612155c17e06
+      name: Gateway stale managed host count
+      type: DEPENDENT
+      key: central.gateway.stale_managed_host_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.zabbix.stale_managed_host_count
+      master_item:
+        key: central.gateway.health.raw
+    - uuid: 5fdd4388a2834f3c8551d53325a81b3e
+      name: Gateway stale managed host names
+      type: DEPENDENT
+      key: central.gateway.stale_managed_host_names
+      value_type: TEXT
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.zabbix.stale_managed_host_names
+      master_item:
+        key: central.gateway.health.raw
+      triggers:
+      - uuid: 86520a8dc7bf4876a3514310f7773e86
+        expression: last(/HPE Aruba Central NG - Gateway/central.gateway.stale_managed_host_names)<>""
+        name: 'HPE Central gateway: stale managed hosts: {ITEM.LASTVALUE}'
+        priority: WARNING
     - uuid: 3952ec5d581a450eaebe242c46060436
       name: Gateway last sync age
       type: DEPENDENT
@@ -281,8 +316,8 @@ zabbix_export:
         status: DISABLED
 
   - uuid: 06555628289844408980746ebc6ea54c
-    template: HPE Aruba Central NG - AP
-    name: HPE Aruba Central NG - AP
+    template: HPE Aruba Central NG - DeviceType AP
+    name: HPE Aruba Central NG - DeviceType AP
     description: AP monitoring through the HPE Aruba Central NG gateway/cache service.
     groups:
     - name: Templates/Network devices
@@ -324,7 +359,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 4a31e94ad67a45f9bfd26220ba2c4a93
-        expression: last(/HPE Aruba Central NG - AP/central.device.gateway_status)<>"ok"
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.device.gateway_status)<>"ok"
         name: 'AP {HOST.NAME}: Central gateway data is stale or unavailable'
         priority: WARNING
     - uuid: d176fb5c663b4cc3ba352c698e2e69ba
@@ -340,7 +375,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 503c17b27f2d443b93715ebe60b3e856
-        expression: last(/HPE Aruba Central NG - AP/central.device.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.device.status)<>"ONLINE"
         name: 'AP {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 9dfed9f0f56043338837c2bfb6cf5926
@@ -401,8 +436,8 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 53286e7531334cd981ce39ac8d04e98d
-        expression: last(/HPE Aruba Central NG - AP/central.ap.radio_down_count)>0
-          and last(/HPE Aruba Central NG - AP/central.device.status)="ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.ap.radio_down_count)>0
+          and last(/HPE Aruba Central NG - DeviceType AP/central.device.status)="ONLINE"
         name: 'AP {HOST.NAME}: one or more radios are down'
         priority: AVERAGE
     - uuid: 60b5f07f642d4170859605ca25d1f266
@@ -453,8 +488,8 @@ zabbix_export:
         key: central.device.raw
 
   - uuid: db297f5e6595423a91f8c960f754f1f3
-    template: HPE Aruba Central NG - Switch
-    name: HPE Aruba Central NG - Switch
+    template: HPE Aruba Central NG - DeviceType Switch
+    name: HPE Aruba Central NG - DeviceType Switch
     description: Switch monitoring through the HPE Aruba Central NG gateway/cache service.
     groups:
     - name: Templates/Network devices
@@ -507,7 +542,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: e0ff0cc5f7d049a8bc5e734d5271dd26
-        expression: last(/HPE Aruba Central NG - Switch/central.device.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.status)<>"ONLINE"
         name: 'Switch {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 5beca6b1cf1741d79fb08e131f1cb465
@@ -568,7 +603,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 33064076cfb04408a331ac660917ca5f
-        expression: last(/HPE Aruba Central NG - Switch/central.switch.interface_down_count)>0
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.interface_down_count)>0
         name: 'Switch {HOST.NAME}: one or more interfaces are down'
         priority: INFO
         status: DISABLED
@@ -585,7 +620,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 7695c1c3b794432290b0b87f3316e419
-        expression: change(/HPE Aruba Central NG - Switch/central.switch.crc_error_count)>100
+        expression: change(/HPE Aruba Central NG - DeviceType Switch/central.switch.crc_error_count)>100
         name: 'Switch {HOST.NAME}: high CRC error increase'
         priority: AVERAGE
         status: DISABLED
@@ -613,8 +648,8 @@ zabbix_export:
         key: central.device.raw
 
   - uuid: 385c21706cac460d972aa60ff6b26bfb
-    template: HPE Aruba Central NG - Gateway Device
-    name: HPE Aruba Central NG - Gateway Device
+    template: HPE Aruba Central NG - DeviceType Gateway
+    name: HPE Aruba Central NG - DeviceType Gateway
     description: Gateway device monitoring through the HPE Aruba Central NG gateway/cache service.
     groups:
     - name: Templates/Network devices
@@ -656,7 +691,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 35f4ab4a7e0841899c69f2206918249a
-        expression: last(/HPE Aruba Central NG - Gateway Device/central.device.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)<>"ONLINE"
         name: 'Gateway {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 8a052b3fd93c41a4a8450513097b2a84
