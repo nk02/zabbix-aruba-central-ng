@@ -15,9 +15,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.0-dev3"
+APP_VERSION = "2.0.0-dev4"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.0-dev3"
+TEMPLATE_VERSION = "2.0.0-dev4"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -559,6 +559,11 @@ def device_host_name(prefix: str, device: dict[str, Any]) -> str:
     return safe_name(f"{prefix} - {device.get('name') or device.get('serial')}")
 
 
+def site_host_name(prefix: str, site_name: Any, site_id: Any) -> str:
+    name = str(site_name or "").strip() or f"Site {site_id}"
+    return safe_name(f"{prefix} - {name}")
+
+
 def device_key(workspace: dict[str, Any], tenant: dict[str, Any], kind: str, serial: str) -> str:
     parts = [str(workspace["workspace_id"]).replace("-", ""), str(tenant["tenant_id"]).replace("-", ""), kind, serial]
     return ".".join(re.sub(r"[^A-Za-z0-9_-]", "_", part) for part in parts)
@@ -583,7 +588,7 @@ def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
                 prefix = host_prefix(workspace, tenant)
                 host = device_host_name(prefix, device)
                 key = device_key(workspace, tenant, kind, serial)
-                device.update({"kind": kind, "host": host, "key": key})
+                device.update({"kind": kind, "host": host, "key": key, "host_prefix": prefix})
                 devices.append(device)
                 state["devices"][key] = {
                     "key": key,
@@ -708,6 +713,7 @@ def zabbix_templates(config: dict[str, Any]) -> dict[str, str]:
         templates = {}
     return {
         "service": str(templates.get("service") or "HPE Aruba Central NG - Gateway"),
+        "site": str(templates.get("site") or "HPE Aruba Central NG - Site"),
         "ap": str(templates.get("ap") or "HPE Aruba Central NG - AP"),
         "switch": str(templates.get("switch") or "HPE Aruba Central NG - Switch"),
         "gateway": str(templates.get("gateway") or "HPE Aruba Central NG - Gateway Device"),
@@ -761,6 +767,8 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
             "{$CENTRAL.DEVICE.TYPE}": str(plan["kind"]),
             "{$CENTRAL.DEVICE.SERIAL}": str(plan.get("serial") or ""),
         })
+    if plan.get("site_id"):
+        macros["{$CENTRAL.SITE.ID}"] = str(plan["site_id"])
     if existing:
         if not host_has_tag(existing.get("tags") or [], tag):
             raise ZabbixError(f"Existing host {plan['host']!r} is not managed by this integration")
@@ -800,7 +808,18 @@ def build_host_plans(config: dict[str, Any], devices: list[dict[str, Any]]) -> l
         "visible_name": gateway_host,
         "template": templates["service"],
     }]
+    sites: dict[str, dict[str, Any]] = {}
     for device in devices:
+        site_id = str(device.get("site_id") or "")
+        if site_id:
+            site_key = f"{device.get('workspace_id')}:{device.get('tenant_id')}:{site_id}"
+            sites.setdefault(site_key, {
+                "kind": "site",
+                "host": site_host_name(str(device.get("host_prefix") or device.get("tenant_name") or "Central"), device.get("site_name"), site_id),
+                "visible_name": site_host_name(str(device.get("host_prefix") or device.get("tenant_name") or "Central"), device.get("site_name"), site_id),
+                "template": templates["site"],
+                "site_id": site_id,
+            })
         kind = str(device["kind"])
         plans.append({
             "kind": kind,
@@ -810,6 +829,7 @@ def build_host_plans(config: dict[str, Any], devices: list[dict[str, Any]]) -> l
             "device_key": device["key"],
             "serial": device.get("serial"),
         })
+    plans.extend(sites.values())
     return sorted(plans, key=lambda item: str(item["host"]))
 
 

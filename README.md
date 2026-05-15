@@ -244,6 +244,7 @@ Raw master items are intentionally configured with `history: 0`. They may look e
 The bundled template contains:
 
 - `HPE Aruba Central NG - Gateway`
+- `HPE Aruba Central NG - Site`
 - `HPE Aruba Central NG - AP`
 - `HPE Aruba Central NG - Switch`
 - `HPE Aruba Central NG - Gateway Device`
@@ -257,6 +258,14 @@ Device templates use:
 - AP radios/ports/WLAN payloads inside the raw gateway response
 - switch interfaces plus best-effort stack, LAG, VSX, and hardware trend payloads where the tenant/API/model exposes them
 - gateway device basic status, firmware, and ports; gateway-specific monitoring is intentionally minimal in this development branch
+
+Site templates use:
+
+- one Site Health HTTP master item;
+- one Client Onboarding HTTP master item;
+- dependent items for gateway status, Good/Fair/Poor health score, and client onboarding failed count.
+
+The sync command creates one managed Zabbix Site host for each Central site discovered from monitored devices. Site hosts use `{$CENTRAL.SITE.ID}` and the same gateway URL macro as device hosts.
 
 Some switch monitoring endpoints are still exposed by Aruba as `v1alpha1`/MRT APIs. The gateway treats these as best-effort enrichment: failures are recorded under `data.errors` and do not make the whole device item fail.
 

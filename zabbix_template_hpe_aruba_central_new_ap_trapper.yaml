@@ -18,7 +18,7 @@ zabbix_export:
       value: 1m
       description: Gateway health polling interval.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.0-dev3
+      value: 2.0.0-dev4
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -112,6 +112,130 @@ zabbix_export:
         - $.package.template.latest
       master_item:
         key: central.gateway.health.raw
+
+  - uuid: b525b1eac6a24f859fbcec657130987d
+    template: HPE Aruba Central NG - Site
+    name: HPE Aruba Central NG - Site
+    description: Site health and client onboarding monitoring through the HPE Aruba
+      Central NG gateway/cache service.
+    groups:
+    - name: Templates/Network devices
+    macros:
+    - macro: '{$CENTRAL.GATEWAY.URL}'
+      value: http://127.0.0.1:8080
+    - macro: '{$CENTRAL.SITE.ID}'
+      value: ''
+    - macro: '{$CENTRAL.SITE.POLL_INTERVAL}'
+      value: 5m
+    - macro: '{$CENTRAL.SITE.ONBOARDING.POLL_INTERVAL}'
+      value: 10m
+    items:
+    - uuid: 05611274213042419df37a7beec22f22
+      name: Site health raw master item
+      type: HTTP_AGENT
+      key: central.site.health.raw
+      delay: '{$CENTRAL.SITE.POLL_INTERVAL}'
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Master HTTP item used by dependent site health items.
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/site/{$CENTRAL.SITE.ID}/health'
+      request_method: GET
+      timeout: 20s
+      status_codes: '200'
+      tags:
+      - tag: component
+        value: site
+    - uuid: 70bcf4b4b1424b7d937538643f16113e
+      name: Site gateway status
+      type: DEPENDENT
+      key: central.site.gateway_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.gateway.status
+      master_item:
+        key: central.site.health.raw
+      triggers:
+      - uuid: 66fd3bec70ef43678ba9b7ce862a7d73
+        expression: last(/HPE Aruba Central NG - Site/central.site.gateway_status)<>"ok"
+        name: 'Site {HOST.NAME}: Central gateway data is unavailable'
+        priority: WARNING
+    - uuid: a70346895c1d4f34a9cdd82630405f0e
+      name: Site health good score
+      type: DEPENDENT
+      key: central.site.health.good
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.health.groups[?(@.name=="Good")].value.first()
+      master_item:
+        key: central.site.health.raw
+    - uuid: dc4b6ab192ff4afca17323788f4de670
+      name: Site health fair score
+      type: DEPENDENT
+      key: central.site.health.fair
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.health.groups[?(@.name=="Fair")].value.first()
+      master_item:
+        key: central.site.health.raw
+    - uuid: 395097270ec44a3fb9ee5120d51b888b
+      name: Site health poor score
+      type: DEPENDENT
+      key: central.site.health.poor
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.health.groups[?(@.name=="Poor")].value.first()
+      master_item:
+        key: central.site.health.raw
+      triggers:
+      - uuid: 9103c7efdfb94720988f248671064cb5
+        expression: last(/HPE Aruba Central NG - Site/central.site.health.poor)>0
+        name: 'Site {HOST.NAME}: poor health detected'
+        priority: AVERAGE
+    - uuid: 2fedbfbdc29342bf80eff691981b73ef
+      name: Site client onboarding raw master item
+      type: HTTP_AGENT
+      key: central.site.client_onboarding.raw
+      delay: '{$CENTRAL.SITE.ONBOARDING.POLL_INTERVAL}'
+      history: '0'
+      trends: '0'
+      value_type: TEXT
+      description: Master HTTP item used by dependent client onboarding items.
+      url: '{$CENTRAL.GATEWAY.URL}/api/v1/site/{$CENTRAL.SITE.ID}/client-onboarding-stage/count?field=topreasons&window-ms=3600000'
+      request_method: GET
+      timeout: 20s
+      status_codes: '200'
+      tags:
+      - tag: component
+        value: site
+    - uuid: 7afa7bad719f4492a30c76e422bf6548
+      name: Site client onboarding failed count
+      type: DEPENDENT
+      key: central.site.client_onboarding.failed_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.count
+      master_item:
+        key: central.site.client_onboarding.raw
+      triggers:
+      - uuid: 3bdd3dded06d44bc9c8375bc8225b9d5
+        expression: last(/HPE Aruba Central NG - Site/central.site.client_onboarding.failed_count)>50
+        name: 'Site {HOST.NAME}: high client onboarding failure count'
+        priority: WARNING
+        status: DISABLED
 
   - uuid: 06555628289844408980746ebc6ea54c
     template: HPE Aruba Central NG - AP

@@ -32,6 +32,7 @@
     },
     "templates": {
       "service": "HPE Aruba Central NG - Gateway",
+      "site": "HPE Aruba Central NG - Site",
       "ap": "HPE Aruba Central NG - AP",
       "switch": "HPE Aruba Central NG - Switch",
       "gateway": "HPE Aruba Central NG - Gateway Device"
