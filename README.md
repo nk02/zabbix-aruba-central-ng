@@ -78,7 +78,7 @@ Minimal structure:
     "interval_seconds": 1800
   },
   "zabbix": {
-    "api_url": "https://zabbix.example.com/api_jsonrpc.php",
+    "api_url": "https://ip-or-fqdn-zabbixserver/api_jsonrpc.php",
     "api_token": "zabbix-api-token",
     "unmapped_host_group": "HPE Aruba Central/Unmapped",
     "gateway_host": "HPE Aruba Central Gateway",
