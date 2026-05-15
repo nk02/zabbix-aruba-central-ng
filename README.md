@@ -50,12 +50,38 @@ Example Central base URL:
 https://de2.api.central.arubanetworks.com
 ```
 
-## Configuration
+## Installation
 
-Copy the example:
+On the Zabbix/gateway VM, install Git and Python if needed:
+
+```bash
+sudo apt update
+sudo apt install -y git python3 ca-certificates
+```
+
+Clone the repository under a stable path:
+
+```bash
+cd /opt
+sudo git clone https://github.com/nk02/zabbix-aruba-central-ng.git hpe-central-zabbix
+sudo chown -R $USER:$USER /opt/hpe-central-zabbix
+cd /opt/hpe-central-zabbix
+```
+
+Prepare the local configuration:
 
 ```bash
 cp workspaces.example.json workspaces.json
+nano workspaces.json
+```
+
+## Configuration
+
+If the repository is already installed, refresh it with:
+
+```bash
+cd /opt/hpe-central-zabbix
+git pull
 ```
 
 On Windows, adapt paths and command names, for example:
@@ -98,6 +124,7 @@ Minimal structure:
 
 Important settings:
 
+- `config_version`: configuration schema version, not the application release version. It changes only when the config format requires special migration handling. Optional backward-compatible settings can be added without changing it.
 - `gateway.base_url`: URL that Zabbix uses to reach the gateway.
 - `gateway.api_rate_limit_per_second`: global Aruba API throttle. Keep it at or below `10`; default is `8`.
 - `gateway.device_cache_ttl_seconds`: cache TTL for device raw data.
