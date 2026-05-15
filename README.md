@@ -1,8 +1,6 @@
 # HPE Aruba Central NG Gateway for Zabbix
 
-Major version 2 changes the architecture.
-
-The Python process is a gateway/sync service. It does not push device values with `zabbix_sender`; Zabbix collects metrics through HTTP agent items pointed at the gateway.
+The Python process is a gateway/sync service. Zabbix collects metrics through HTTP agent items pointed at the gateway.
 
 - `sync-zabbix`: authenticates to GreenLake, discovers tenants/devices, imports the Zabbix template, creates/updates Zabbix hosts, and writes `gateway_state.json`.
 - `gateway`: exposes a local HTTP API used by Zabbix HTTP agent items. It manages Aruba tokens, cache, retry, and global API rate limiting.
@@ -26,8 +24,6 @@ The gateway keeps all Aruba API calls behind one rate limiter. The default is `8
 - Python 3.10 or newer.
 - A server that can reach GreenLake, Aruba Central New Central APIs, and Zabbix API.
 - Zabbix must be able to reach the gateway HTTP URL.
-
-`zabbix_sender` is no longer required in version 2.
 
 ## GreenLake Credentials
 
@@ -70,7 +66,7 @@ Minimal structure:
     "device_cache_ttl_seconds": 240,
     "site_cache_ttl_seconds": 300,
     "version_check_enabled": true,
-    "version_check_ref": "development-v2"
+    "version_check_ref": "main"
   },
   "sync": {
     "interval_seconds": 1800
@@ -238,6 +234,10 @@ Gateway response shape:
 ```
 
 Raw master items are intentionally configured with `history: 0`. They may look empty in Latest data, but they are still required because dependent items extract all visible metrics from their current JSON response.
+
+## Streaming APIs
+
+HPE Aruba Central Streaming APIs are intentionally not used by this gateway at the moment. They require Advanced licensing, while the current implementation relies on REST monitoring APIs so it can work in environments where Advanced licenses are not available.
 
 ## Zabbix Templates
 

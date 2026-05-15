@@ -25,7 +25,7 @@ TENANTS_PATH = "/workspaces/v1/msp-tenants"
 CONFIG_PATH = Path(__file__).with_name("workspaces.json")
 TOKEN_CACHE_PATH = Path(__file__).with_name(".token_cache.json")
 GATEWAY_STATE_PATH = Path(__file__).with_name("gateway_state.json")
-TEMPLATE_PATH = Path(__file__).with_name("zabbix_template_hpe_aruba_central_new_ap_trapper.yaml")
+TEMPLATE_PATH = Path(__file__).with_name("zabbix_template_hpe_aruba_central_ng_gateway.yaml")
 
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMIT_WINDOW = 0.0
@@ -249,7 +249,7 @@ def package_version_status(config: dict[str, Any]) -> dict[str, Any]:
             "app": version_component("gateway", APP_VERSION, None, "version check disabled"),
             "template": version_component("template", TEMPLATE_VERSION, None, "version check disabled"),
         }
-    ref = str(gateway.get("version_check_ref") or "development-v2")
+    ref = str(gateway.get("version_check_ref") or "main")
     base = str(gateway.get("version_check_base_url") or GITHUB_RAW_BASE_URL).rstrip("/")
     result: dict[str, Any] = {"status": "current"}
     try:
@@ -258,7 +258,7 @@ def package_version_status(config: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         result["app"] = version_component("gateway", APP_VERSION, None, str(exc))
     try:
-        latest_template = extract_template_version(request_text(f"{base}/{ref}/zabbix_template_hpe_aruba_central_new_ap_trapper.yaml"))
+        latest_template = extract_template_version(request_text(f"{base}/{ref}/zabbix_template_hpe_aruba_central_ng_gateway.yaml"))
         result["template"] = version_component("template", TEMPLATE_VERSION, latest_template)
     except Exception as exc:
         result["template"] = version_component("template", TEMPLATE_VERSION, None, str(exc))

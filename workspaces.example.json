@@ -9,7 +9,7 @@
     "device_cache_ttl_seconds": 240,
     "site_cache_ttl_seconds": 300,
     "version_check_enabled": true,
-    "version_check_ref": "development-v2",
+    "version_check_ref": "main",
     "access_log": false
   },
   "sync": {
