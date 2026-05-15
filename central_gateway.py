@@ -16,15 +16,16 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.9"
+APP_VERSION = "2.0.10"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.9"
+TEMPLATE_VERSION = "2.0.10"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
 TENANTS_PATH = "/workspaces/v1/msp-tenants"
 CONFIG_PATH = Path(__file__).with_name("workspaces.json")
+EXAMPLE_CONFIG_PATH = Path(__file__).with_name("workspaces.example.json")
 TOKEN_CACHE_PATH = Path(__file__).with_name(".token_cache.json")
 GATEWAY_STATE_PATH = Path(__file__).with_name("gateway_state.json")
 TEMPLATE_PATH = Path(__file__).with_name("zabbix_template_hpe_aruba_central_ng_gateway.yaml")
@@ -104,6 +105,59 @@ def config_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def config_shape(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): config_shape(item) for key, item in value.items()}
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, (dict, list)):
+                return [config_shape(item)]
+        return []
+    return None
+
+
+def compare_config_shapes(current: Any, example: Any, path: str = "") -> tuple[list[str], list[str]]:
+    missing: list[str] = []
+    extra: list[str] = []
+    if isinstance(example, dict):
+        current = current if isinstance(current, dict) else {}
+        for key in sorted(example):
+            child = f"{path}.{key}" if path else key
+            if key not in current:
+                missing.append(child)
+            else:
+                child_missing, child_extra = compare_config_shapes(current[key], example[key], child)
+                missing.extend(child_missing)
+                extra.extend(child_extra)
+        for key in sorted(current):
+            if key not in example:
+                extra.append(f"{path}.{key}" if path else key)
+    elif isinstance(example, list) and example and isinstance(example[0], (dict, list)):
+        current_items = current if isinstance(current, list) else []
+        current_schema = next((item for item in current_items if isinstance(item, type(example[0]))), {})
+        return compare_config_shapes(current_schema, example[0], f"{path}[]")
+    return missing, extra
+
+
+def config_diff(config: dict[str, Any], example_path: Path = EXAMPLE_CONFIG_PATH) -> dict[str, Any]:
+    if not example_path.exists():
+        return {
+            "status": "warning",
+            "example_path": str(example_path),
+            "missing_optional_config_keys": [],
+            "extra_config_keys": [],
+            "error": "example config not found",
+        }
+    example = load_json_config(example_path)
+    missing, extra = compare_config_shapes(config_shape(config), config_shape(example))
+    return {
+        "status": "ok" if not missing and not extra else "warning",
+        "example_path": str(example_path),
+        "missing_optional_config_keys": missing,
+        "extra_config_keys": extra,
+    }
+
+
 def config_check(config: dict[str, Any]) -> dict[str, Any]:
     missing: list[str] = []
     if not config_section(config, "zabbix").get("api_url"):
@@ -116,12 +170,15 @@ def config_check(config: dict[str, Any]) -> dict[str, Any]:
         for key in ("name", "mode", "workspace_id", "client_id", "client_secret", "central_base_url"):
             if not workspace.get(key):
                 missing.append(f"workspaces[{index}].{key}")
+    diff = config_diff(config)
     return {
         "status": "ok" if not missing else "warning",
         "app_version": APP_VERSION,
         "config_version": config.get("config_version"),
         "expected_config_version": CONFIG_SCHEMA_VERSION,
         "missing": missing,
+        "missing_optional_config_keys": diff.get("missing_optional_config_keys", []),
+        "extra_config_keys": diff.get("extra_config_keys", []),
         "workspace_count": len(config_list(config, "workspaces")),
     }
 
@@ -1439,6 +1496,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="HPE Aruba Central NG gateway/sync for Zabbix")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("config-check")
+    sub.add_parser("config-diff")
     import_parser = sub.add_parser("import-zabbix-template")
     import_parser.add_argument("--apply", action="store_true")
     sync_parser = sub.add_parser("sync-zabbix")
@@ -1451,6 +1509,9 @@ def main() -> int:
         config = load_json_config()
         if args.command == "config-check":
             print(json.dumps(config_check(config), ensure_ascii=True))
+            return 0
+        if args.command == "config-diff":
+            print(json.dumps(config_diff(config), ensure_ascii=True))
             return 0
         if args.command == "import-zabbix-template":
             print(json.dumps(import_zabbix_template(config, apply=args.apply), ensure_ascii=True))

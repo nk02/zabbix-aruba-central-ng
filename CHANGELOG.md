@@ -7,6 +7,12 @@ All notable changes to this project are documented here.
 - Documentation now starts from Git clone installation on a production VM.
 - Documented that `config_version` is the configuration schema version, not the application release version.
 
+## 2.0.10
+
+- Added `config-diff` to compare `workspaces.json` structure with `workspaces.example.json`.
+- `config-check` now reports optional keys missing from the local config and extra keys not present in the example.
+- The config comparison reports key paths only and does not print secret values.
+
 ## 2.0.9
 
 - Fixed preservation of existing Zabbix template group memberships during template import.

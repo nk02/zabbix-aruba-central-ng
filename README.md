@@ -222,6 +222,14 @@ Validate configuration:
 python3 ./central_gateway.py config-check
 ```
 
+Compare your local config structure with `workspaces.example.json`:
+
+```bash
+python3 ./central_gateway.py config-diff
+```
+
+`config-diff` reports key paths only. It does not print token, client secret, or credential values. Missing optional keys usually do not block execution, but they show that `workspaces.example.json` contains newer settings that you may want to copy into your local config.
+
 Preview template import:
 
 ```bash
@@ -356,6 +364,7 @@ Recommended test sequence after editing `workspaces.json`:
 
 ```bash
 python3 ./central_gateway.py config-check
+python3 ./central_gateway.py config-diff
 python3 ./central_gateway.py import-zabbix-template
 python3 ./central_gateway.py import-zabbix-template --apply
 python3 ./central_gateway.py sync-zabbix
@@ -468,6 +477,7 @@ cd /opt/hpe-central-zabbix
 git fetch --tags
 git pull
 python3 ./central_gateway.py config-check
+python3 ./central_gateway.py config-diff
 python3 ./central_gateway.py import-zabbix-template --apply
 sudo systemctl restart hpe-aruba-central-gateway.service
 ```
