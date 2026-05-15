@@ -27,9 +27,9 @@ The gateway keeps all Aruba API calls behind one rate limiter. The default is `8
 
 ## Deployment And Exposure
 
-Expose the gateway only when Zabbix needs to reach it from outside the local network, for example with Zabbix Cloud. In that case, publish it through a protected endpoint such as Cloudflare Tunnel plus access controls, and avoid exposing plain TCP `8080` directly to the Internet.
+Expose the gateway only when Zabbix needs to reach it from outside the local network, for example with Zabbix Cloud. In that case, publish it through a protected endpoint such as Cloudflare Tunnel plus access controls, and avoid exposing plain TCP `6767` directly to the Internet.
 
-When Zabbix runs on a local VM or on the same private network, keep the gateway private. The recommended deployment is a VM or service host in the same L2/L3 network as Zabbix or the Zabbix proxy, with `gateway.base_url` pointing to an internal DNS name or IP address. Do not publish port `8080` publicly in this scenario.
+When Zabbix runs on a local VM or on the same private network, keep the gateway private. The recommended deployment is a VM or service host in the same L2/L3 network as Zabbix or the Zabbix proxy, with `gateway.base_url` pointing to an internal DNS name or IP address. Do not publish port `6767` publicly in this scenario.
 
 ## GreenLake Credentials
 
@@ -65,8 +65,8 @@ Minimal structure:
   "config_version": "2.0.0",
   "gateway": {
     "listen": "0.0.0.0",
-    "port": 8080,
-    "base_url": "http://central-gateway.example.com:8080",
+    "port": 6767,
+    "base_url": "http://ip-or-fqdn-gatewayserver:6767",
     "api_rate_limit_per_second": 8,
     "api_retry_attempts": 3,
     "device_cache_ttl_seconds": 240,

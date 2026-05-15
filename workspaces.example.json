@@ -2,8 +2,8 @@
   "config_version": "2.0.0",
   "gateway": {
     "listen": "0.0.0.0",
-    "port": 8080,
-    "base_url": "http://central-gateway.example.com:8080",
+    "port": 6767,
+    "base_url": "http://ip-or-fqdn-gatewayserver:6767",
     "api_rate_limit_per_second": 8,
     "api_retry_attempts": 3,
     "device_cache_ttl_seconds": 240,

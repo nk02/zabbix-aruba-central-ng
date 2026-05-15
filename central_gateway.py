@@ -15,9 +15,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.3"
+TEMPLATE_VERSION = "2.0.4"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
@@ -837,7 +837,7 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
         return result
     templates = template_ids(config, [str(plan["template"])])
     macros = {
-        "{$CENTRAL.GATEWAY.URL}": str(config_section(config, "gateway").get("base_url") or "http://127.0.0.1:8080"),
+        "{$CENTRAL.GATEWAY.URL}": str(config_section(config, "gateway").get("base_url") or "http://127.0.0.1:6767"),
     }
     if plan.get("device_key"):
         macros.update({
@@ -1303,7 +1303,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
 def run_gateway(config: dict[str, Any]) -> None:
     gateway = config_section(config, "gateway")
     listen = str(gateway.get("listen") or "0.0.0.0")
-    port = int(gateway.get("port") or 8080)
+    port = int(gateway.get("port") or 6767)
     GatewayHandler.config = config
     server = ThreadingHTTPServer((listen, port), GatewayHandler)
     print(json.dumps({"status": "listening", "listen": listen, "port": port, "version": APP_VERSION}))
