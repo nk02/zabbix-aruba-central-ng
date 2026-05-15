@@ -18,7 +18,7 @@ zabbix_export:
       value: 1m
       description: Gateway health polling interval.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.0-dev1
+      value: 2.0.0-dev2
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -90,13 +90,15 @@ zabbix_export:
       value: 5m
     items:
     - uuid: 443bf5425ad14ea99b0cd7c23b0cebaf
-      name: AP raw
+      name: AP raw master item
       type: HTTP_AGENT
       key: central.device.raw
       delay: '{$CENTRAL.AP.POLL_INTERVAL}'
       history: '0'
       trends: '0'
       value_type: TEXT
+      description: Master HTTP item used by dependent items. History is disabled
+        intentionally.
       url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
       request_method: GET
       timeout: 20s
@@ -134,8 +136,6 @@ zabbix_export:
       triggers:
       - uuid: 503c17b27f2d443b93715ebe60b3e856
         expression: last(/HPE Aruba Central NG - AP/central.device.status)<>"ONLINE"
-          and last(/HPE Aruba Central NG - AP/central.device.status)<>"Up"
-          and last(/HPE Aruba Central NG - AP/central.device.status)<>"up"
         name: 'AP {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 9dfed9f0f56043338837c2bfb6cf5926
@@ -154,10 +154,11 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.uptime_ms
       value_type: UNSIGNED
+      units: uptime
       preprocessing:
       - type: JSONPATH
         parameters:
-        - $.summary.uptime_in_millis
+        - $.summary.uptime_seconds
       master_item:
         key: central.device.raw
     - uuid: 64a1300bed224c3698a7f7e99a8d8a3f
@@ -200,13 +201,15 @@ zabbix_export:
       value: 5m
     items:
     - uuid: 0bd8a1e829d046fca0e15f1f4a09be04
-      name: Switch raw
+      name: Switch raw master item
       type: HTTP_AGENT
       key: central.device.raw
       delay: '{$CENTRAL.SWITCH.POLL_INTERVAL}'
       history: '0'
       trends: '0'
       value_type: TEXT
+      description: Master HTTP item used by dependent items. History is disabled
+        intentionally.
       url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
       request_method: GET
       timeout: 20s
@@ -239,8 +242,6 @@ zabbix_export:
       triggers:
       - uuid: e0ff0cc5f7d049a8bc5e734d5271dd26
         expression: last(/HPE Aruba Central NG - Switch/central.device.status)<>"ONLINE"
-          and last(/HPE Aruba Central NG - Switch/central.device.status)<>"Up"
-          and last(/HPE Aruba Central NG - Switch/central.device.status)<>"up"
         name: 'Switch {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 5beca6b1cf1741d79fb08e131f1cb465
@@ -259,10 +260,11 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.uptime_ms
       value_type: UNSIGNED
+      units: uptime
       preprocessing:
       - type: JSONPATH
         parameters:
-        - $.summary.uptime_in_millis
+        - $.summary.uptime_seconds
       master_item:
         key: central.device.raw
     - uuid: 1263604ff162424dbbe869d15ac918fa
@@ -292,13 +294,15 @@ zabbix_export:
       value: 5m
     items:
     - uuid: 21f2179436f14f1987e3d139dcfe63b7
-      name: Gateway device raw
+      name: Gateway device raw master item
       type: HTTP_AGENT
       key: central.device.raw
       delay: '{$CENTRAL.GATEWAY.DEVICE.POLL_INTERVAL}'
       history: '0'
       trends: '0'
       value_type: TEXT
+      description: Master HTTP item used by dependent items. History is disabled
+        intentionally.
       url: '{$CENTRAL.GATEWAY.URL}/api/v1/device/{$CENTRAL.DEVICE.KEY}/raw'
       request_method: GET
       timeout: 20s
@@ -320,7 +324,5 @@ zabbix_export:
       triggers:
       - uuid: 35f4ab4a7e0841899c69f2206918249a
         expression: last(/HPE Aruba Central NG - Gateway Device/central.device.status)<>"ONLINE"
-          and last(/HPE Aruba Central NG - Gateway Device/central.device.status)<>"Up"
-          and last(/HPE Aruba Central NG - Gateway Device/central.device.status)<>"up"
         name: 'Gateway {HOST.NAME}: not online'
         priority: HIGH

@@ -15,9 +15,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.0-dev1"
+APP_VERSION = "2.0.0-dev2"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.0-dev1"
+TEMPLATE_VERSION = "2.0.0-dev2"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
 TOKEN_PATH = "/authorization/v2/oauth2/{workspace_id}/token"
 TENANTS_PATH = "/workspaces/v1/msp-tenants"
@@ -368,6 +368,23 @@ def first_value(data: dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def normalize_status(value: Any) -> str:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if lowered in ("online", "up", "connected", "ok"):
+        return "ONLINE"
+    if lowered in ("offline", "down", "disconnected"):
+        return "OFFLINE"
+    return text.upper() if text else ""
+
+
+def millis_to_seconds(value: Any) -> int | None:
+    try:
+        return int(float(value) / 1000)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_device(raw: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any]) -> dict[str, Any]:
     device_type = str(first_value(raw, "deviceType", "type", "device_type") or "").upper()
     if device_type in ("ACCESSPOINT", "AP"):
@@ -384,7 +401,7 @@ def normalize_device(raw: dict[str, Any], workspace: dict[str, Any], tenant: dic
         "ipv4": raw.get("ipv4"),
         "site_id": first_value(raw, "siteId", "site_id"),
         "site_name": first_value(raw, "siteName", "site"),
-        "status": first_value(raw, "status", "health"),
+        "status": normalize_status(first_value(raw, "status", "health")),
         "firmware": first_value(raw, "firmwareVersion", "softwareVersion"),
         "device_type": device_type,
         "raw": raw,
@@ -580,7 +597,7 @@ def zabbix_templates(config: dict[str, Any]) -> dict[str, str]:
     if not isinstance(templates, dict):
         templates = {}
     return {
-        "collector": str(templates.get("collector") or "HPE Aruba Central NG - Gateway"),
+        "service": str(templates.get("service") or "HPE Aruba Central NG - Gateway"),
         "ap": str(templates.get("ap") or "HPE Aruba Central NG - AP"),
         "switch": str(templates.get("switch") or "HPE Aruba Central NG - Switch"),
         "gateway": str(templates.get("gateway") or "HPE Aruba Central NG - Gateway Device"),
@@ -666,12 +683,12 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool) -> di
 def build_host_plans(config: dict[str, Any], devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
     zbx = config_section(config, "zabbix")
     templates = zabbix_templates(config)
-    collector_host = str(zbx.get("gateway_host") or "HPE Aruba Central Gateway")
+    gateway_host = str(zbx.get("gateway_host") or "HPE Aruba Central Gateway")
     plans = [{
-        "kind": "collector",
-        "host": collector_host,
-        "visible_name": collector_host,
-        "template": templates["collector"],
+        "kind": "gateway_service",
+        "host": gateway_host,
+        "visible_name": gateway_host,
+        "template": templates["service"],
     }]
     for device in devices:
         kind = str(device["kind"])
@@ -749,9 +766,10 @@ def normalize_summary(kind: str, raw: dict[str, Any], device: dict[str, Any]) ->
         "ipv4": data.get("ipv4"),
         "site_id": first_value(data, "siteId", "site_id") or device.get("site_id"),
         "site_name": first_value(data, "siteName", "site") or device.get("site_name"),
-        "status": first_value(data, "status", "health"),
+        "status": normalize_status(first_value(data, "status", "health")),
         "firmware": first_value(data, "firmwareVersion", "softwareVersion"),
         "uptime_in_millis": data.get("uptimeInMillis"),
+        "uptime_seconds": millis_to_seconds(data.get("uptimeInMillis")),
         "cpu_utilization": first_stats.get("cpuUtilization") if kind == "ap" else data.get("cpuUtilization"),
         "memory_utilization": first_stats.get("memoryUtilization") if kind == "ap" else data.get("memoryUtilization"),
         "config_status": data.get("configStatus"),

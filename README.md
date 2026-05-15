@@ -2,10 +2,15 @@
 
 Major version 2 changes the architecture.
 
-The Python process is no longer a metric collector and does not push device values with `zabbix_sender`. It is now split into two roles:
+The Python process is a gateway/sync service. It does not push device values with `zabbix_sender`; Zabbix collects metrics through HTTP agent items pointed at the gateway.
 
 - `sync-zabbix`: authenticates to GreenLake, discovers tenants/devices, imports the Zabbix template, creates/updates Zabbix hosts, and writes `gateway_state.json`.
 - `gateway`: exposes a local HTTP API used by Zabbix HTTP agent items. It manages Aruba tokens, cache, retry, and global API rate limiting.
+
+The communication is bidirectional:
+
+- gateway to Zabbix API: template import and managed host synchronization;
+- Zabbix to gateway HTTP API: live metric collection through HTTP agent items.
 
 Zabbix performs the actual monitoring through HTTP agent master items and dependent items.
 
@@ -59,7 +64,7 @@ Minimal structure:
   "gateway": {
     "listen": "0.0.0.0",
     "port": 8080,
-    "base_url": "http://collector-server.example.com:8080",
+    "base_url": "http://central-gateway.example.com:8080",
     "api_rate_limit_per_second": 8,
     "api_retry_attempts": 3,
     "device_cache_ttl_seconds": 240
@@ -130,43 +135,43 @@ For standalone workspaces, set `mapping`:
 Validate configuration:
 
 ```powershell
-python .\central_collector.py config-check
+python .\central_gateway.py config-check
 ```
 
 Preview template import:
 
 ```powershell
-python .\central_collector.py import-zabbix-template
+python .\central_gateway.py import-zabbix-template
 ```
 
 Apply template import:
 
 ```powershell
-python .\central_collector.py import-zabbix-template --apply
+python .\central_gateway.py import-zabbix-template --apply
 ```
 
 Preview Zabbix synchronization:
 
 ```powershell
-python .\central_collector.py sync-zabbix
+python .\central_gateway.py sync-zabbix
 ```
 
 Apply Zabbix synchronization:
 
 ```powershell
-python .\central_collector.py sync-zabbix --apply
+python .\central_gateway.py sync-zabbix --apply
 ```
 
 Start only the gateway:
 
 ```powershell
-python .\central_collector.py gateway
+python .\central_gateway.py gateway
 ```
 
 Start gateway and run periodic sync in the same process:
 
 ```powershell
-python .\central_collector.py run
+python .\central_gateway.py run
 ```
 
 ## Gateway Endpoints
@@ -206,7 +211,7 @@ Gateway response shape:
 }
 ```
 
-Zabbix stores `data` only as raw master item input with `history: 0`; dependent items extract the metrics.
+Raw master items are intentionally configured with `history: 0`. They may look empty in Latest data, but they are still required because dependent items extract all visible metrics from their current JSON response.
 
 ## Zabbix Templates
 
@@ -230,21 +235,21 @@ More detailed switch hardware, LAG, VSX, stack, PSU, fan, license, and client-co
 Recommended first run:
 
 ```powershell
-python .\central_collector.py config-check
-python .\central_collector.py sync-zabbix --apply
-python .\central_collector.py gateway
+python .\central_gateway.py config-check
+python .\central_gateway.py sync-zabbix --apply
+python .\central_gateway.py gateway
 ```
 
 For production, run the gateway as a service and schedule:
 
 ```powershell
-python .\central_collector.py sync-zabbix --apply
+python .\central_gateway.py sync-zabbix --apply
 ```
 
 every 10 to 30 minutes, or use:
 
 ```powershell
-python .\central_collector.py run
+python .\central_gateway.py run
 ```
 
 to keep gateway and periodic sync in one process.

@@ -3,7 +3,7 @@
   "gateway": {
     "listen": "0.0.0.0",
     "port": 8080,
-    "base_url": "http://collector-server.example.com:8080",
+    "base_url": "http://central-gateway.example.com:8080",
     "api_rate_limit_per_second": 8,
     "api_retry_attempts": 3,
     "device_cache_ttl_seconds": 240,
@@ -28,7 +28,7 @@
       "gateway": "Gateway"
     },
     "templates": {
-      "collector": "HPE Aruba Central NG - Gateway",
+      "service": "HPE Aruba Central NG - Gateway",
       "ap": "HPE Aruba Central NG - AP",
       "switch": "HPE Aruba Central NG - Switch",
       "gateway": "HPE Aruba Central NG - Gateway Device"
