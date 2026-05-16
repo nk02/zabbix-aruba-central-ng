@@ -412,6 +412,79 @@ zabbix_export:
         - $.summary.firmware_last_upgraded_at
       master_item:
         key: central.device.raw
+    - uuid: e1727ee8b75c4b4ca4bc51bca05ab7a6
+      name: AP firmware upgrade status
+      type: DEPENDENT
+      key: central.device.firmware_upgrade_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_upgrade_status
+      master_item:
+        key: central.device.raw
+    - uuid: 61a4744acfe1434fb32cb49912693389
+      name: AP firmware classification
+      type: DEPENDENT
+      key: central.device.firmware_classification
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_classification
+      master_item:
+        key: central.device.raw
+    - uuid: f2700b5b6c424d1dabcb2cb66be17dd6
+      name: AP endpoint error count
+      type: DEPENDENT
+      key: central.device.endpoint_error_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.endpoint_error_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 2624abf6fc434ca1bb592b7792db58f3
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.device.endpoint_error_count)>0
+          and last(/HPE Aruba Central NG - DeviceType AP/central.device.gateway_status)="ok"
+        name: 'AP {HOST.NAME}: one or more Aruba API endpoints returned errors'
+        priority: INFO
+        status: DISABLED
+    - uuid: 4af7a967fbf54e00bafbc0d5364b289b
+      name: AP client count
+      type: DEPENDENT
+      key: central.ap.client_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.client_count
+      master_item:
+        key: central.device.raw
+    - uuid: d0b6f78ba4e74559b05c348f9ca3f5fe
+      name: AP radio count
+      type: DEPENDENT
+      key: central.ap.radio_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.radio_count
+      master_item:
+        key: central.device.raw
+    - uuid: 8b9406ef9dd14fe1a37030fc4ea0c5ab
+      name: AP WLAN count
+      type: DEPENDENT
+      key: central.ap.wlan_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.wlan_count
+      master_item:
+        key: central.device.raw
     - uuid: 00ca760e1e084e3daf4ae9b8a85b7c73
       name: AP radio down count
       type: DEPENDENT
@@ -440,6 +513,24 @@ zabbix_export:
         - $.summary.port_down_count
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 34fcdfcbcff34260b9671dc1c580bfe6
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.device.port_down_count)>0
+          and last(/HPE Aruba Central NG - DeviceType AP/central.device.status)="ONLINE"
+        name: 'AP {HOST.NAME}: one or more Ethernet ports are down'
+        priority: INFO
+        status: DISABLED
+    - uuid: 7b2cf52e7b5748d786d2cf48c2d31ef2
+      name: AP port count
+      type: DEPENDENT
+      key: central.ap.port_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.port_count
+      master_item:
+        key: central.device.raw
     - uuid: 4761215301cb4f95838ab1b3070d4392
       name: AP error count
       type: DEPENDENT
@@ -463,6 +554,12 @@ zabbix_export:
         - $.summary.cpu_utilization
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 6ed57084cdfb4ce9b9a714a921a8029f
+        expression: min(/HPE Aruba Central NG - DeviceType AP/central.device.cpu_utilization,15m)>90
+        name: 'AP {HOST.NAME}: high CPU utilization'
+        priority: WARNING
+        status: DISABLED
     - uuid: 95232aaba0034578a6fc6effcca6ed4d
       name: AP memory utilization
       type: DEPENDENT
@@ -475,6 +572,12 @@ zabbix_export:
         - $.summary.memory_utilization
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 5c78b949fd6a45a19bf9bd059e9d6019
+        expression: min(/HPE Aruba Central NG - DeviceType AP/central.device.memory_utilization,15m)>90
+        name: 'AP {HOST.NAME}: high memory utilization'
+        priority: WARNING
+        status: DISABLED
 
   - uuid: db297f5e6595423a91f8c960f754f1f3
     template: HPE Aruba Central NG - DeviceType Switch
@@ -541,6 +644,42 @@ zabbix_export:
         - $.summary.firmware
       master_item:
         key: central.device.raw
+    - uuid: 0ec76d6766cc4b8882f752d7786a6f0c
+      name: Switch CPU utilization
+      type: DEPENDENT
+      key: central.device.cpu_utilization
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.cpu_utilization
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 3d7fb6803154450d8a9abfd89ddc3405
+        expression: min(/HPE Aruba Central NG - DeviceType Switch/central.device.cpu_utilization,15m)>90
+        name: 'Switch {HOST.NAME}: high CPU utilization'
+        priority: WARNING
+        status: DISABLED
+    - uuid: b7a93c9f5d5248febb08f8ca85ac94d1
+      name: Switch memory utilization
+      type: DEPENDENT
+      key: central.device.memory_utilization
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.memory_utilization
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: d371d9a871cf451da381a45d0678d58b
+        expression: min(/HPE Aruba Central NG - DeviceType Switch/central.device.memory_utilization,15m)>90
+        name: 'Switch {HOST.NAME}: high memory utilization'
+        priority: WARNING
+        status: DISABLED
     - uuid: 8585f292ed5a4f11a0566fe535df4ec6
       name: Switch uptime
       type: DEPENDENT
@@ -575,6 +714,46 @@ zabbix_export:
         - $.summary.firmware_last_upgraded_at
       master_item:
         key: central.device.raw
+    - uuid: 8d2c51b38a824931a7ef46586a8e8706
+      name: Switch firmware upgrade status
+      type: DEPENDENT
+      key: central.device.firmware_upgrade_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_upgrade_status
+      master_item:
+        key: central.device.raw
+    - uuid: 5412a644e1084f7ea257503d1d9fb610
+      name: Switch firmware classification
+      type: DEPENDENT
+      key: central.device.firmware_classification
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_classification
+      master_item:
+        key: central.device.raw
+    - uuid: 8d6d76c6b7c0432d9534d97a6620ed2c
+      name: Switch endpoint error count
+      type: DEPENDENT
+      key: central.device.endpoint_error_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.endpoint_error_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 3d39e1feac0644b18a2dd7a893db5e45
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.endpoint_error_count)>0
+          and last(/HPE Aruba Central NG - DeviceType Switch/central.device.gateway_status)="ok"
+        name: 'Switch {HOST.NAME}: one or more Aruba API endpoints returned errors'
+        priority: INFO
+        status: DISABLED
     - uuid: df908bf3935a4a8a83336ee80029daf9
       name: Switch interface down count
       type: DEPENDENT
@@ -592,6 +771,67 @@ zabbix_export:
         name: 'Switch {HOST.NAME}: one or more interfaces are down'
         priority: INFO
         status: DISABLED
+    - uuid: 35734c893f3147e8962176d8b5615caf
+      name: Switch interface count
+      type: DEPENDENT
+      key: central.switch.interface_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.interface_count
+      master_item:
+        key: central.device.raw
+    - uuid: a4c72c05e98d42d391ce9f1539fe3540
+      name: Switch LAG count
+      type: DEPENDENT
+      key: central.switch.lag_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.lag_count
+      master_item:
+        key: central.device.raw
+    - uuid: c00fb6efe1c14a7298b55e4761f38ff9
+      name: Switch stack member count
+      type: DEPENDENT
+      key: central.switch.stack_member_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.stack_member_count
+      master_item:
+        key: central.device.raw
+    - uuid: a1fd44a061974793b0fa9076176d0ec4
+      name: Switch VSX status
+      type: DEPENDENT
+      key: central.switch.vsx_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.vsx_status
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: a2e8c7c8f44e45ff9a1b95c27c268182
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"ONLINE"
+        name: 'Switch {HOST.NAME}: VSX status is not online'
+        priority: WARNING
+        status: DISABLED
+    - uuid: 7aaf0e01af9349b58d593591112f57a3
+      name: Switch hardware component count
+      type: DEPENDENT
+      key: central.switch.hardware_component_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.hardware_component_count
+      master_item:
+        key: central.device.raw
     - uuid: a73b7ffb99264164be0cd8b8910a5ae6
       name: Switch CRC error count
       type: DEPENDENT
@@ -620,6 +860,12 @@ zabbix_export:
         - $.summary.drop_count
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 2e9f62f16a1f45caa9fdca415b0f78ea
+        expression: change(/HPE Aruba Central NG - DeviceType Switch/central.switch.drop_count)>100
+        name: 'Switch {HOST.NAME}: high packet drop increase'
+        priority: AVERAGE
+        status: DISABLED
     - uuid: 1263604ff162424dbbe869d15ac918fa
       name: Switch config status
       type: DEPENDENT
@@ -631,6 +877,12 @@ zabbix_export:
         - $.summary.config_status
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 3b083c5db9654e7f8c88bb86da3d6d22
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"IN_SYNC"
+        name: 'Switch {HOST.NAME}: config status is not in sync'
+        priority: INFO
+        status: DISABLED
 
   - uuid: 385c21706cac460d972aa60ff6b26bfb
     template: HPE Aruba Central NG - DeviceType Gateway
@@ -675,6 +927,65 @@ zabbix_export:
         expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)<>"ONLINE"
         name: 'Gateway {HOST.NAME}: not online'
         priority: HIGH
+    - uuid: 54b9b45843c340f8a0aa24576802ccec
+      name: Gateway firmware
+      type: DEPENDENT
+      key: central.device.firmware
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware
+      master_item:
+        key: central.device.raw
+    - uuid: 3f560742cadf42bf8d8bbc0b6f9b1b15
+      name: Gateway uptime
+      type: DEPENDENT
+      key: central.device.uptime_ms
+      value_type: UNSIGNED
+      units: uptime
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uptime_seconds
+      master_item:
+        key: central.device.raw
+    - uuid: 22a4e4fe2c5542ea8c8ae9ca8fa70a2f
+      name: Gateway CPU utilization
+      type: DEPENDENT
+      key: central.device.cpu_utilization
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.cpu_utilization
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 7132f0c4d215486f8741e020555fb2fb
+        expression: min(/HPE Aruba Central NG - DeviceType Gateway/central.device.cpu_utilization,15m)>90
+        name: 'Gateway {HOST.NAME}: high CPU utilization'
+        priority: WARNING
+        status: DISABLED
+    - uuid: 6a2934d11ae240d08e7789f45a764f81
+      name: Gateway memory utilization
+      type: DEPENDENT
+      key: central.device.memory_utilization
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.memory_utilization
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 5ee3cb67b43c43829e437c2a5204e284
+        expression: min(/HPE Aruba Central NG - DeviceType Gateway/central.device.memory_utilization,15m)>90
+        name: 'Gateway {HOST.NAME}: high memory utilization'
+        priority: WARNING
+        status: DISABLED
     - uuid: 8a052b3fd93c41a4a8450513097b2a84
       name: Gateway recommended firmware
       type: DEPENDENT
@@ -697,6 +1008,46 @@ zabbix_export:
         - $.summary.firmware_last_upgraded_at
       master_item:
         key: central.device.raw
+    - uuid: 216e468ab9984fce9351dc69d5265f61
+      name: Gateway firmware upgrade status
+      type: DEPENDENT
+      key: central.device.firmware_upgrade_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_upgrade_status
+      master_item:
+        key: central.device.raw
+    - uuid: 9d7ced0955194df39cf2b9de42033d3a
+      name: Gateway firmware classification
+      type: DEPENDENT
+      key: central.device.firmware_classification
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.firmware_classification
+      master_item:
+        key: central.device.raw
+    - uuid: 3aa4827f6cf54e64b6d561c7835f610e
+      name: Gateway endpoint error count
+      type: DEPENDENT
+      key: central.device.endpoint_error_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.endpoint_error_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: a3c6b07c0dd3440a9e7b9ea147c83a8d
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.endpoint_error_count)>0
+          and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)="ONLINE"
+        name: 'Gateway {HOST.NAME}: one or more Aruba API endpoints returned errors'
+        priority: INFO
+        status: DISABLED
     - uuid: 41bd8b303d4c4baab002f37d148b8340
       name: Gateway port down count
       type: DEPENDENT
@@ -706,5 +1057,23 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.port_down_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: d9d999730c6a4fb0ba3e8dfdd72dbe56
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.port_down_count)>0
+          and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)="ONLINE"
+        name: 'Gateway {HOST.NAME}: one or more ports are down'
+        priority: INFO
+        status: DISABLED
+    - uuid: 8e229d7998ab470f8d103a4e98efcc2c
+      name: Gateway port count
+      type: DEPENDENT
+      key: central.gateway.port_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.port_count
       master_item:
         key: central.device.raw

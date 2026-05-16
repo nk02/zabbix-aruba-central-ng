@@ -724,21 +724,31 @@ def zabbix_api_call(config: dict[str, Any], method: str, params: dict[str, Any] 
             ssl_context = ssl._create_unverified_context()
     payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": 1}
     data = json.dumps(payload).encode("utf-8")
-    req = Request(
-        api_url,
-        data=data,
-        headers={"Accept": "application/json", "Content-Type": "application/json-rpc", "Authorization": f"Bearer {zbx['api_token']}"},
-        method="POST",
-    )
-    try:
-        with urlopen(req, timeout=60, context=ssl_context) as response:
-            body = response.read().decode("utf-8")
-            result = json.loads(body) if body else {}
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise ZabbixError(f"Zabbix API HTTP {exc.code}: {body}") from exc
-    except URLError as exc:
-        raise ZabbixError(f"Zabbix API network error calling {api_url}: {exc.reason}") from exc
+    attempts = int(zbx.get("api_retry_attempts") or 3)
+    result: dict[str, Any] | list[Any] | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        req = Request(
+            api_url,
+            data=data,
+            headers={"Accept": "application/json", "Content-Type": "application/json-rpc", "Authorization": f"Bearer {zbx['api_token']}"},
+            method="POST",
+        )
+        try:
+            with urlopen(req, timeout=60, context=ssl_context) as response:
+                body = response.read().decode("utf-8")
+                result = json.loads(body) if body else {}
+                break
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if exc.code in {502, 503, 504} and attempt < attempts:
+                time.sleep(min(2 ** attempt, 10))
+                continue
+            raise ZabbixError(f"Zabbix API HTTP {exc.code}: {body}") from exc
+        except URLError as exc:
+            if attempt < attempts:
+                time.sleep(min(2 ** attempt, 10))
+                continue
+            raise ZabbixError(f"Zabbix API network error calling {api_url}: {exc.reason}") from exc
     if isinstance(result, dict) and result.get("error"):
         raise ZabbixError(f"Zabbix API {method} failed: {result['error']}")
     return result.get("result") if isinstance(result, dict) else result
@@ -786,6 +796,30 @@ def existing_template_groups(config: dict[str, Any], names: list[str]) -> dict[s
     return result
 
 
+def existing_template_object_statuses(config: dict[str, Any], names: list[str]) -> dict[str, str]:
+    if not names:
+        return {}
+    templates = zabbix_api_call(config, "template.get", {
+        "output": ["templateid", "host"],
+        "selectItems": ["itemid", "uuid", "status"],
+        "selectTriggers": ["triggerid", "uuid", "status"],
+        "filter": {"host": names},
+    })
+    statuses: dict[str, str] = {}
+    for template in templates or []:
+        if not isinstance(template, dict):
+            continue
+        for collection in ("items", "triggers"):
+            for item in template.get(collection) or []:
+                if not isinstance(item, dict):
+                    continue
+                uuid = str(item.get("uuid") or "").strip()
+                if not uuid:
+                    continue
+                statuses[uuid] = "DISABLED" if str(item.get("status")) == "1" else "ENABLED"
+    return statuses
+
+
 def render_template_group_header(records: dict[str, dict[str, Any]], names: list[str]) -> str:
     lines = ["  template_groups:"]
     for name in names:
@@ -799,11 +833,47 @@ def render_groups_block(names: list[str]) -> str:
     return "    groups:\n" + "".join(f"    - name: {yaml_scalar(name)}\n" for name in names)
 
 
+def apply_preserved_statuses(source: str, statuses: dict[str, str]) -> str:
+    if not statuses:
+        return source
+    lines = source.splitlines()
+    blocks: list[tuple[int, int, str]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)-\s*uuid:\s*([0-9a-f]{32})\s*$", line)
+        if match:
+            blocks.append((index, len(match.group(1)), match.group(2)))
+    for position in range(len(blocks) - 1, -1, -1):
+        start, block_indent, uuid = blocks[position]
+        desired_status = statuses.get(uuid)
+        if not desired_status:
+            continue
+        block_end = len(lines)
+        for next_start, next_indent, _ in blocks[position + 1:]:
+            if next_indent <= block_indent:
+                block_end = next_start
+                break
+        status_index = None
+        for probe in range(start + 1, block_end):
+            if re.match(rf"^\s{{{block_indent + 2}}}status:\s+", lines[probe]):
+                status_index = probe
+                break
+        if desired_status == "DISABLED":
+            status_line = " " * (block_indent + 2) + "status: DISABLED"
+            if status_index is None:
+                lines.insert(block_end, status_line)
+            else:
+                lines[status_index] = status_line
+        elif status_index is not None:
+            del lines[status_index]
+    return "\n".join(lines) + "\n"
+
+
 def render_zabbix_template_source(config: dict[str, Any]) -> tuple[str, list[str]]:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
     names = template_names()
     configured_group = zabbix_template_group(config)
     existing_groups = existing_template_groups(config, names)
+    existing_statuses = existing_template_object_statuses(config, names)
     all_group_names = sorted({configured_group, *(group for groups in existing_groups.values() for group in groups)})
     records = template_group_records(config, all_group_names)
     missing = [name for name in all_group_names if name not in records]
@@ -830,6 +900,7 @@ def render_zabbix_template_source(config: dict[str, Any]) -> tuple[str, list[str
         return re.sub(r"(?m)^    groups:\n(?:    - name: .+\n)+", render_groups_block(groups), block, count=1)
 
     source = re.sub(r"(?ms)^  - uuid: .*?(?=^  - uuid: |\Z)", replace_template_block, source)
+    source = apply_preserved_statuses(source, existing_statuses)
     return source, all_group_names
 
 
@@ -844,8 +915,8 @@ def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[
         "rules": {
             "template_groups": {"createMissing": False},
             "templates": {"createMissing": True, "updateExisting": True},
-            "items": {"createMissing": True, "updateExisting": True},
-            "triggers": {"createMissing": True, "updateExisting": True},
+            "items": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
+            "triggers": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
             "valueMaps": {"createMissing": True, "updateExisting": True},
         },
         "source": source,
@@ -1224,6 +1295,37 @@ def firmware_summary(firmware: dict[str, Any] | list[dict[str, Any]] | None) -> 
     }
 
 
+def count_payload_records(value: Any) -> int:
+    if isinstance(value, list):
+        return len([item for item in value if isinstance(item, dict)])
+    if isinstance(value, dict):
+        items = list_items(value)
+        if items:
+            return len(items)
+    return 0
+
+
+def string_or_empty(value: Any) -> str:
+    return str(value).strip() if value not in (None, "") else ""
+
+
+def nested_value(data: Any, path: tuple[str, ...]) -> Any:
+    current = data
+    for part in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
+
+
+def first_nested_value(data: Any, paths: list[tuple[str, ...]]) -> Any:
+    for path in paths:
+        value = nested_value(data, path)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
     raw = payload.get("details") if isinstance(payload.get("details"), dict) else payload
     data = raw.get("ap") if kind == "ap" and isinstance(raw.get("ap"), dict) else raw
@@ -1232,7 +1334,41 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     ports = list_items(payload.get("ports"))
     radios = list_items(payload.get("radios"))
     interfaces = list_items(payload.get("interfaces"))
+    wlans = list_items(payload.get("wlans"))
     firmware = firmware_summary(payload.get("firmware"))
+    lag_summary = payload.get("lag_summary")
+    stack_members = payload.get("stack_members")
+    hardware_trends = payload.get("hardware_trends")
+    vsx_detail = payload.get("vsx_detail")
+    client_count = first_value(
+        first_stats,
+        "clientCount",
+        "clients",
+        "numClients",
+        "associatedClients",
+    )
+    if client_count in (None, ""):
+        client_count = first_value(
+            data,
+            "clientCount",
+            "clients",
+            "numClients",
+            "associatedClients",
+        )
+    vsx_status = normalize_status(
+        first_nested_value(vsx_detail, [
+            ("status",),
+            ("health",),
+            ("vsx", "status"),
+            ("vsx", "health"),
+            ("summary", "status"),
+        ])
+    )
+    hardware_member_count = max(
+        count_payload_records(hardware_trends),
+        count_payload_records(first_nested_value(hardware_trends, [("fans",), ("powerSupplies",), ("managementModules",)])),
+    )
+    error_count = len([name for name in (payload.get("errors") or {}) if name])
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
@@ -1253,12 +1389,22 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "firmware_upgrade_status": firmware.get("upgrade_status"),
         "firmware_classification": firmware.get("classification"),
         "firmware_last_upgraded_at": firmware.get("last_upgraded_at"),
+        "endpoint_error_count": error_count,
         "port_down_count": count_down(ports),
+        "port_count": len(ports),
         "radio_down_count": count_down(radios),
+        "radio_count": len(radios),
+        "wlan_count": len(wlans),
+        "client_count": client_count,
         "interface_down_count": count_down(interfaces),
+        "interface_count": len(interfaces),
         "crc_error_count": sum_numeric_fields(ports + interfaces, ("crc",)),
         "drop_count": sum_numeric_fields(ports + interfaces, ("drop", "dropped")),
         "error_count": sum_numeric_fields(ports + interfaces, ("error", "errors")),
+        "lag_count": count_payload_records(lag_summary),
+        "stack_member_count": count_payload_records(stack_members),
+        "hardware_component_count": hardware_member_count,
+        "vsx_status": vsx_status,
     }
     return summary
 
@@ -1425,16 +1571,30 @@ def gateway_health(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class QuietThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        exc_type, exc, _ = sys.exc_info()
+        if exc_type and isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
 class GatewayHandler(BaseHTTPRequestHandler):
     config: dict[str, Any] = {}
 
     def write_json(self, status: int, body: dict[str, Any]) -> None:
         payload = json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, TimeoutError):
+            return
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -1474,7 +1634,7 @@ def run_gateway(config: dict[str, Any]) -> None:
     listen = str(gateway.get("listen") or "0.0.0.0")
     port = int(gateway.get("port") or 6767)
     GatewayHandler.config = config
-    server = ThreadingHTTPServer((listen, port), GatewayHandler)
+    server = QuietThreadingHTTPServer((listen, port), GatewayHandler)
     print(json.dumps({"status": "listening", "listen": listen, "port": port, "version": APP_VERSION}))
     server.serve_forever()
 
