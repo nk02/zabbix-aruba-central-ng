@@ -1286,11 +1286,19 @@ def firmware_summary(firmware: dict[str, Any] | list[dict[str, Any]] | None) -> 
     item = items[0] if items else firmware if isinstance(firmware, dict) else {}
     if not isinstance(item, dict):
         item = {}
+    software_version = string_or_empty(first_value(item, "softwareVersion", "firmwareVersion"))
+    recommended_version = string_or_empty(first_value(item, "recommendedVersion", "recommendedFirmwareVersion"))
+    upgrade_status = string_or_empty(first_value(item, "upgradeStatus"))
+    classification = string_or_empty(first_value(item, "firmwareClassification"))
+    if software_version and recommended_version and software_version == recommended_version:
+        classification = "Current recommended firmware"
+        if not upgrade_status:
+            upgrade_status = "CURRENT"
     return {
-        "software_version": first_value(item, "softwareVersion", "firmwareVersion"),
-        "recommended_version": first_value(item, "recommendedVersion", "recommendedFirmwareVersion"),
-        "upgrade_status": first_value(item, "upgradeStatus"),
-        "classification": first_value(item, "firmwareClassification"),
+        "software_version": software_version or None,
+        "recommended_version": recommended_version or None,
+        "upgrade_status": upgrade_status or None,
+        "classification": classification or None,
         "last_upgraded_at": first_value(item, "lastUpgradedAt", "lastUpgradeAt", "lastUpgradedTime"),
     }
 
