@@ -1616,7 +1616,7 @@ def firmware_summary(firmware: dict[str, Any] | list[dict[str, Any]] | None) -> 
         "recommended_version": first_value(item, "recommendedVersion", "recommendedFirmwareVersion"),
         "upgrade_status": first_value(item, "upgradeStatus"),
         "classification": first_value(item, "firmwareClassification"),
-        "last_upgraded_at": first_value(item, "lastUpgradedAt", "lastUpgradeAt", "lastUpgradedTime"),
+        "last_upgraded_at": first_value(item, "lastUpgradedAt", "lastUpgradeAt", "lastUpgradedTime", "lastUpgradedTimeAt"),
     }
 
 
