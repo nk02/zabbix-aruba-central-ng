@@ -978,7 +978,6 @@ zabbix_export:
         expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.transceiver_failed_count)>0
         name: 'Switch {HOST.NAME}: one or more transceivers are unhealthy'
         priority: WARNING
-        status: DISABLED
     - uuid: a73b7ffb99264164be0cd8b8910a5ae6
       name: Switch CRC error count
       type: DEPENDENT
