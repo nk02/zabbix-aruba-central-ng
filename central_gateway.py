@@ -1762,7 +1762,10 @@ def optional_switch_discovery(summary: dict[str, Any]) -> dict[str, list[dict[st
         "vsx": [],
         "lag": [],
         "stack": [],
-        "hardware": [],
+        "fans": [],
+        "power_supplies": [],
+        "management_modules": [],
+        "transceivers": [],
     }
     if str(summary.get("vsx_status") or "").strip():
         features["vsx"].append({"id": "vsx", "name": "VSX"})
@@ -1770,14 +1773,14 @@ def optional_switch_discovery(summary: dict[str, Any]) -> dict[str, list[dict[st
         features["lag"].append({"id": "lag", "name": "LAG"})
     if int(summary.get("stack_member_count") or 0) > 0:
         features["stack"].append({"id": "stack", "name": "Stack"})
-    if any(int(summary.get(key) or 0) > 0 for key in (
-        "hardware_component_count",
-        "fan_count",
-        "power_supply_count",
-        "management_module_count",
-        "transceiver_count",
-    )):
-        features["hardware"].append({"id": "hardware", "name": "Hardware"})
+    if int(summary.get("fan_count") or 0) > 0:
+        features["fans"].append({"id": "fans", "name": "Fans"})
+    if int(summary.get("power_supply_count") or 0) > 0:
+        features["power_supplies"].append({"id": "power_supplies", "name": "Power supplies"})
+    if int(summary.get("management_module_count") or 0) > 0:
+        features["management_modules"].append({"id": "management_modules", "name": "Management modules"})
+    if int(summary.get("transceiver_count") or 0) > 0:
+        features["transceivers"].append({"id": "transceivers", "name": "Transceivers"})
     return features
 
 

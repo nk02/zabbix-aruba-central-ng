@@ -1061,7 +1061,7 @@ zabbix_export:
           - $.summary.vsx_status
         master_item:
           key: central.device.raw
-        triggers:
+        trigger_prototypes:
         - uuid: 125581692e604dcdb7beb9a7d1fa1074
           expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"ONLINE"
           name: 'Switch {HOST.NAME}: VSX status is not online'
@@ -1122,15 +1122,15 @@ zabbix_export:
         master_item:
           key: central.device.raw
     - uuid: 185b3e69060842238aa430c744f4e36f
-      name: Switch hardware discovery
+      name: Switch fan discovery
       type: DEPENDENT
-      key: central.switch.hardware.discovery
+      key: central.switch.fans.discovery
       delay: '0'
       lifetime: 30d
       preprocessing:
       - type: JSONPATH
         parameters:
-        - $.optional.hardware
+        - $.optional.fans
       lld_macro_paths:
       - lld_macro: '{#FEATURE_ID}'
         path: $.id
@@ -1138,17 +1138,6 @@ zabbix_export:
         key: central.device.raw
       item_prototypes:
       - uuid: bd9835fa67a54d6f81fe8b4448ca7f83
-        name: Switch hardware component count
-        type: DEPENDENT
-        key: central.switch.hardware_component_count
-        value_type: UNSIGNED
-        preprocessing:
-        - type: JSONPATH
-          parameters:
-          - $.summary.hardware_component_count
-        master_item:
-          key: central.device.raw
-      - uuid: 19c1932c52e44fbe90631d8e81ed08b4
         name: Switch fan count
         type: DEPENDENT
         key: central.switch.fan_count
@@ -1170,12 +1159,28 @@ zabbix_export:
           - $.summary.fan_failed_count
         master_item:
           key: central.device.raw
-        triggers:
+        trigger_prototypes:
         - uuid: 2649d6c1a72f42a9a1ecc46c4e2df96e
           expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.fan_failed_count)>0
           name: 'Switch {HOST.NAME}: one or more fans are unhealthy'
           priority: HIGH
-      - uuid: 7269f00379aa4d8988cbb7085aeb1eb2
+    - uuid: 7269f00379aa4d8988cbb7085aeb1eb2
+      name: Switch power supply discovery
+      type: DEPENDENT
+      key: central.switch.power_supplies.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.optional.power_supplies
+      lld_macro_paths:
+      - lld_macro: '{#FEATURE_ID}'
+        path: $.id
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: 1ffb730f98fa4fabaa04e1a8e9a829ba
         name: Switch power supply count
         type: DEPENDENT
         key: central.switch.power_supply_count
@@ -1197,12 +1202,28 @@ zabbix_export:
           - $.summary.power_supply_failed_count
         master_item:
           key: central.device.raw
-        triggers:
+        trigger_prototypes:
         - uuid: 9239dbde304c4ee7a80d8580c8ea1ccc
           expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.power_supply_failed_count)>0
           name: 'Switch {HOST.NAME}: one or more power supplies are unhealthy'
           priority: HIGH
-      - uuid: 1408bba9bbb44d04b9ab2511ded3e027
+    - uuid: 1408bba9bbb44d04b9ab2511ded3e027
+      name: Switch management module discovery
+      type: DEPENDENT
+      key: central.switch.management_modules.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.optional.management_modules
+      lld_macro_paths:
+      - lld_macro: '{#FEATURE_ID}'
+        path: $.id
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: 0d2d5b313b8d4dc282d9702d186e947a
         name: Switch management module count
         type: DEPENDENT
         key: central.switch.management_module_count
@@ -1224,12 +1245,39 @@ zabbix_export:
           - $.summary.management_module_failed_count
         master_item:
           key: central.device.raw
-        triggers:
+        trigger_prototypes:
         - uuid: b516084abf5849e4bd088142cdb3c093
           expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.management_module_failed_count)>0
           name: 'Switch {HOST.NAME}: one or more management modules are unhealthy'
           priority: HIGH
-      - uuid: 177916fab9e3489c9d7532c1f9491551
+    - uuid: 177916fab9e3489c9d7532c1f9491551
+      name: Switch transceiver discovery
+      type: DEPENDENT
+      key: central.switch.transceivers.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.optional.transceivers
+      lld_macro_paths:
+      - lld_macro: '{#FEATURE_ID}'
+        path: $.id
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: df65a3e19b0a4c4b8aac76289c22ab16
+        name: Switch hardware component count
+        type: DEPENDENT
+        key: central.switch.hardware_component_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.hardware_component_count
+        master_item:
+          key: central.device.raw
+      - uuid: be7cb4f4fccf4202996092eaba264047
         name: Switch transceiver count
         type: DEPENDENT
         key: central.switch.transceiver_count
@@ -1251,7 +1299,7 @@ zabbix_export:
           - $.summary.transceiver_failed_count
         master_item:
           key: central.device.raw
-        triggers:
+        trigger_prototypes:
         - uuid: f5a0b439a399434590ca47d5e9588c51
           expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.transceiver_failed_count)>0
           name: 'Switch {HOST.NAME}: one or more transceivers are unhealthy'
