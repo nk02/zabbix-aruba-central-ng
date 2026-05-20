@@ -1192,6 +1192,214 @@ zabbix_export:
         tags:
         - tag: component
           value: uplink
+    - uuid: b96552fa06894319b9f3d9db8520048e
+      name: Switch interface discovery
+      type: DEPENDENT
+      key: central.switch.interface.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.interfaces
+      lld_macro_paths:
+      - lld_macro: '{#IF_ID}'
+        path: $.id
+      - lld_macro: '{#IF_NAME}'
+        path: $.name
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: 085afe881ca34e00ac571cd7d33f8be0
+        name: 'Switch interface {#IF_NAME}: status'
+        type: DEPENDENT
+        key: 'central.switch.interface.status[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].status.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+        trigger_prototypes:
+        - uuid: e712b13193914f7cad1cd4c76cc0accd
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.interface.status[{#IF_ID}])<>"Connected" and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.interface.status[{#IF_ID}])<>"ONLINE"'
+          name: 'Switch {HOST.NAME}: interface {#IF_NAME} is not connected'
+          priority: INFO
+          status: DISABLED
+      - uuid: 4f61bf1f5f134f8686ab259506bc01ef
+        name: 'Switch interface {#IF_NAME}: admin status'
+        type: DEPENDENT
+        key: 'central.switch.interface.admin_status[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].adminStatus.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: 96c51228764649b6af689ee842574bcd
+        name: 'Switch interface {#IF_NAME}: operational status'
+        type: DEPENDENT
+        key: 'central.switch.interface.oper_status[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].operStatus.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: ff36c0c9cb7b435e870b7f67198cb259
+        name: 'Switch interface {#IF_NAME}: speed'
+        type: DEPENDENT
+        key: 'central.switch.interface.speed[{#IF_ID}]'
+        value_type: FLOAT
+        units: bps
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].speed.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: 7059f81d70244c8d9710f3d81e6564c2
+        name: 'Switch interface {#IF_NAME}: CRC error count'
+        type: DEPENDENT
+        key: 'central.switch.interface.crc_error_count[{#IF_ID}]'
+        value_type: UNSIGNED
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].crc.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+        trigger_prototypes:
+        - uuid: 391418a2106744878845504beeef0d02
+          expression: 'change(/HPE Aruba Central NG - DeviceType Switch/central.switch.interface.crc_error_count[{#IF_ID}])>100'
+          name: 'Switch {HOST.NAME}: interface {#IF_NAME} high CRC error increase'
+          priority: AVERAGE
+          status: DISABLED
+      - uuid: 2a27ed8a97664e2eaccf73fbcc4362f2
+        name: 'Switch interface {#IF_NAME}: packet drop count'
+        type: DEPENDENT
+        key: 'central.switch.interface.drop_count[{#IF_ID}]'
+        value_type: UNSIGNED
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].drop.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+        trigger_prototypes:
+        - uuid: aebd25997c3a4f3fa65cc3246ff8b56a
+          expression: 'change(/HPE Aruba Central NG - DeviceType Switch/central.switch.interface.drop_count[{#IF_ID}])>100'
+          name: 'Switch {HOST.NAME}: interface {#IF_NAME} high packet drop increase'
+          priority: AVERAGE
+          status: DISABLED
+      - uuid: dbb3b2fbcca14d8f952af5457a7992fc
+        name: 'Switch interface {#IF_NAME}: error count'
+        type: DEPENDENT
+        key: 'central.switch.interface.error_count[{#IF_ID}]'
+        value_type: UNSIGNED
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].errors.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+        trigger_prototypes:
+        - uuid: 969325c8ec7347c7b79fb4bda735f109
+          expression: 'change(/HPE Aruba Central NG - DeviceType Switch/central.switch.interface.error_count[{#IF_ID}])>0'
+          name: 'Switch {HOST.NAME}: interface {#IF_NAME} error counter increased'
+          priority: WARNING
+          status: DISABLED
+      - uuid: f815fd3c98e940a2ab6892afeb15b23c
+        name: 'Switch interface {#IF_NAME}: neighbour'
+        type: DEPENDENT
+        key: 'central.switch.interface.neighbour[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].neighbour.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: faab4c11524145529886c6751c877ac8
+        name: 'Switch interface {#IF_NAME}: transceiver status'
+        type: DEPENDENT
+        key: 'central.switch.interface.transceiver_status[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].transceiverStatus.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: e71836be9a604c909cf38b5ed925cf1d
+        name: 'Switch interface {#IF_NAME}: transceiver model'
+        type: DEPENDENT
+        key: 'central.switch.interface.transceiver_model[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].transceiverModel.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: f2fc9ca870004f3f8c9740b8ed67ee11
+        name: 'Switch interface {#IF_NAME}: connector'
+        type: DEPENDENT
+        key: 'central.switch.interface.connector[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].connector.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
 
   - uuid: 385c21706cac460d972aa60ff6b26bfb
     template: HPE Aruba Central NG - DeviceType Gateway
