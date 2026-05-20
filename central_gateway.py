@@ -1299,7 +1299,7 @@ def list_items(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
-        for key in ("items", "data", "ports", "radios", "interfaces", "wlans"):
+        for key in ("items", "data", "ports", "radios", "interfaces", "wlans", "neighbours", "neighbors", "switchMetrics", "samples"):
             items = value.get(key)
             if isinstance(items, list):
                 return [item for item in items if isinstance(item, dict)]
@@ -1342,6 +1342,11 @@ def truthy(value: Any) -> bool:
         return value
     text = str(value or "").strip().lower()
     return text in {"1", "true", "yes", "y", "up", "online", "enabled"}
+
+
+def is_not_found_error(value: str | None) -> bool:
+    text = str(value or "")
+    return "HTTP 404" in text or "404 Route Not Found" in text
 
 
 def is_down_status(value: Any) -> bool:
@@ -1432,7 +1437,7 @@ def extract_uplink_ids(device: dict[str, Any], details: dict[str, Any], lag_summ
 def neighbour_map(neighbours: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     mapping: dict[str, list[dict[str, Any]]] = {}
     for record in neighbours:
-        local_port = first_value(record, "port", "portName", "port_name", "localPort", "localPortName", "interface", "interfaceName")
+        local_port = first_value(record, "port", "portName", "port_name", "localPort", "localPortName", "interface", "interfaceName", "toPort")
         if local_port in (None, ""):
             continue
         mapping.setdefault(str(local_port).strip(), []).append(record)
@@ -1446,9 +1451,17 @@ def is_probable_uplink(record: dict[str, Any], neighbours: list[dict[str, Any]])
         return True
     if any(token in str(first_value(record, "type", "role", "description", "name") or "").lower() for token in ("trunk", "peer", "isl", "lag", "port-channel")):
         return True
+    if str(first_value(record, "stpPortRole", "stp_port_role") or "").lower() == "root":
+        return True
     for neighbour in neighbours:
-        remote_type = str(first_value(neighbour, "deviceType", "neighborDeviceType", "neighbor_type", "type", "platform") or "").lower()
-        if any(token in remote_type for token in ("switch", "gateway", "router", "firewall")):
+        remote_type = str(first_value(neighbour, "deviceType", "neighborDeviceType", "neighbor_type", "type", "platform", "neighbourType", "neighbourFamily") or "").lower()
+        remote_name = str(first_value(neighbour, "neighborName", "deviceName", "hostname", "name", "neighbour") or "").lower()
+        remote_vendor = str(first_value(neighbour, "vendor", "neighbourFunction") or "").lower()
+        if any(token in remote_type for token in ("switch", "gateway", "router", "firewall", "managed", "unmanaged")):
+            return True
+        if any(token in remote_name for token in ("switch", "aruba", "hp-", "cx", "procurve")):
+            return True
+        if any(token in remote_vendor for token in ("hewlett", "aruba", "cisco", "juniper", "fortinet")):
             return True
     return False
 
@@ -1469,13 +1482,19 @@ def build_uplink_records(device: dict[str, Any], interfaces: list[dict[str, Any]
         if not is_uplink:
             continue
         speed = first_value(interface, "speed", "linkSpeed", "speedMbps", "linkSpeedMbps")
+        try:
+            speed_value = float(speed) if speed not in (None, "") else None
+        except (TypeError, ValueError):
+            speed_value = None
+        if speed_value is not None and speed_value > 100000:
+            speed_value = speed_value / 1000000
         record = {
             "id": identifier or str(len(records) + 1),
             "name": str(first_value(interface, "name", "portName", "port_name", "interfaceName") or identifier or f"uplink-{len(records) + 1}"),
             "status": normalize_status(first_value(interface, "status", "health", "operStatus", "linkStatus")),
             "admin_status": normalize_status(first_value(interface, "adminStatus", "admin_state")),
             "oper_status": normalize_status(first_value(interface, "operStatus", "linkStatus", "status")),
-            "speed_mbps": speed,
+            "speed_mbps": speed_value,
             "crc_error_count": pick_numeric(interface, ("crc",)),
             "drop_count": pick_numeric(interface, ("drop", "dropped")),
             "error_count": pick_numeric(interface, ("error", "errors")),
@@ -1548,6 +1567,8 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     data = raw.get("ap") if kind == "ap" and isinstance(raw.get("ap"), dict) else raw
     stats = data.get("apStats")
     first_stats = stats[0] if isinstance(stats, list) and stats and isinstance(stats[0], dict) else {}
+    switch_trends = list_items(data.get("switchTrends"))
+    first_switch_trend = switch_trends[0] if switch_trends else {}
     ports = list_items(payload.get("ports"))
     radios = list_items(payload.get("radios"))
     interfaces = list_items(payload.get("interfaces"))
@@ -1603,10 +1624,10 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "site_name": first_value(data, "siteName", "site") or device.get("site_name"),
         "status": normalize_status(first_value(data, "status", "health")),
         "firmware": first_value(data, "firmwareVersion", "softwareVersion"),
-        "uptime_in_millis": data.get("uptimeInMillis"),
-        "uptime_seconds": millis_to_seconds(data.get("uptimeInMillis")),
-        "cpu_utilization": first_stats.get("cpuUtilization") if kind == "ap" else data.get("cpuUtilization"),
-        "memory_utilization": first_stats.get("memoryUtilization") if kind == "ap" else data.get("memoryUtilization"),
+        "uptime_in_millis": data.get("uptimeInMillis") if data.get("uptimeInMillis") not in (None, "") else (int(float(data.get("upTime"))) * 1000 if data.get("upTime") not in (None, "") else None),
+        "uptime_seconds": millis_to_seconds(data.get("uptimeInMillis")) if data.get("uptimeInMillis") not in (None, "") else first_value(data, "upTime"),
+        "cpu_utilization": first_stats.get("cpuUtilization") if kind == "ap" else first_value(data, "cpuUtilization") if first_value(data, "cpuUtilization") not in (None, "") else first_switch_trend.get("cpuUtilization"),
+        "memory_utilization": first_stats.get("memoryUtilization") if kind == "ap" else first_value(data, "memoryUtilization") if first_value(data, "memoryUtilization") not in (None, "") else first_switch_trend.get("memoryUtilization"),
         "config_status": data.get("configStatus"),
         "firmware_recommended_version": firmware.get("recommended_version"),
         "firmware_upgrade_status": firmware.get("upgrade_status"),
@@ -1695,7 +1716,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         for name, path in extra_paths.items():
             value, endpoint_error = central_get_optional(config, workspace, tenant, path, query)
             payload[name] = value or {}
-            if endpoint_error:
+            if endpoint_error and not (name in {"lag_summary", "vsx_detail", "stack_members"} and is_not_found_error(endpoint_error)):
                 payload["errors"][name] = endpoint_error
         payload["uplinks"] = build_uplink_records(
             device,
