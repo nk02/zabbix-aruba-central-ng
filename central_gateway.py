@@ -1407,6 +1407,95 @@ def count_unhealthy(records: list[dict[str, Any]]) -> int:
     return count
 
 
+def transceiver_interfaces(interfaces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for interface in interfaces:
+        connector = str(first_value(interface, "connector") or "").strip().upper()
+        if "SFP" not in connector and "QSFP" not in connector:
+            continue
+        state = str(first_value(interface, "transceiverState") or "").strip().upper()
+        status = str(first_value(interface, "transceiverStatus") or "").strip().upper()
+        if any(
+            first_value(interface, key) not in (None, "", "-", "Unknown", "UNKNOWN")
+            for key in ("transceiverSerial", "transceiverModel", "transceiverProductNumber", "transceiverType")
+        ):
+            records.append(interface)
+            continue
+        if state not in ("", "UNKNOWN", "NO_TRANSCEIVER_INSERTED") or status not in ("", "UNKNOWN", "NOT AVAILABLE", "NO_TRANSCEIVER_INSERTED"):
+            records.append(interface)
+    return records
+
+
+def unhealthy_transceiver_count(interfaces: list[dict[str, Any]]) -> int:
+    healthy_states = {
+        "TRANSCEIVER_INSERTED",
+        "INSERTED",
+        "PRESENT",
+        "AVAILABLE",
+        "NORMAL",
+        "UP",
+        "ONLINE",
+    }
+    ignored_states = {
+        "",
+        "UNKNOWN",
+        "UNSPECIFIED",
+        "NOT_APPLICABLE",
+        "NOT PRESENT",
+        "NOT_PRESENT",
+        "ABSENT",
+        "NO_TRANSCEIVER_INSERTED",
+        "NOT AVAILABLE",
+    }
+    count = 0
+    for interface in transceiver_interfaces(interfaces):
+        state = str(first_value(interface, "transceiverState") or "").strip().upper()
+        status = str(first_value(interface, "transceiverStatus") or "").strip().upper()
+        combined = {state, status} - {""}
+        if any(token in combined for token in healthy_states):
+            continue
+        if combined and all(token in ignored_states for token in combined):
+            continue
+        if any(token in " ".join(combined) for token in ("FAULT", "FAIL", "ERROR", "UNSUPPORTED", "INVALID", "ALARM", "MISMATCH")):
+            count += 1
+    return count
+
+
+def interface_transceiver_summary(interfaces: list[dict[str, Any]]) -> dict[str, int]:
+    capable_connectors = {"SFP", "SFP+", "SFP28", "QSFP", "QSFP+", "QSFP28", "QSFP56", "XFP", "GBIC"}
+    installed_count = 0
+    failed_count = 0
+    for interface in interfaces:
+        connector = str(first_value(interface, "connector") or "").strip().upper()
+        state = str(first_value(interface, "transceiverState") or "").strip().upper()
+        status = str(first_value(interface, "transceiverStatus") or "").strip().upper()
+        serial = str(first_value(interface, "transceiverSerial") or "").strip()
+        model = str(first_value(interface, "transceiverModel", "transceiverType", "transceiverProductNumber") or "").strip()
+        if not any([connector in capable_connectors, state, status, serial, model]):
+            continue
+        absent_states = {
+            "",
+            "NO_TRANSCEIVER_INSERTED",
+            "NOT_AVAILABLE",
+            "NOT AVAILABLE",
+            "ABSENT",
+            "EMPTY",
+            "NONE",
+        }
+        present = bool(serial or model)
+        if state and state not in absent_states:
+            present = True
+        if status and status not in absent_states:
+            present = True
+        if not present:
+            continue
+        installed_count += 1
+        failure_tokens = ("FAIL", "FAULT", "ERROR", "UNSUPPORT", "INVALID", "ALARM")
+        if any(token in state for token in failure_tokens) or any(token in status for token in failure_tokens):
+            failed_count += 1
+    return {"count": installed_count, "failed_count": failed_count}
+
+
 def extract_uplink_ids(device: dict[str, Any], details: dict[str, Any], lag_summary: Any, vsx_detail: Any) -> set[str]:
     candidates: set[str] = set()
     for source in (device.get("raw"), details, lag_summary, vsx_detail):
@@ -1612,6 +1701,7 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     power_supplies = hardware_records(hardware_trends, ("powerSupplies",), ("power_supplies",), ("summary", "powerSupplies"))
     management_modules = hardware_records(hardware_trends, ("managementModules",), ("management_modules",), ("summary", "managementModules"))
     transceivers = hardware_records(hardware_trends, ("transceivers",), ("optics",), ("summary", "transceivers"))
+    transceiver_ports = transceiver_interfaces(interfaces)
     error_count = len([name for name in (payload.get("errors") or {}) if name])
     summary = {
         "kind": kind,
@@ -1660,8 +1750,8 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "power_supply_failed_count": count_unhealthy(power_supplies),
         "management_module_count": len(management_modules),
         "management_module_failed_count": count_unhealthy(management_modules),
-        "transceiver_count": len(transceivers),
-        "transceiver_failed_count": count_unhealthy(transceivers),
+        "transceiver_count": len(transceivers) if transceivers else len(transceiver_ports),
+        "transceiver_failed_count": count_unhealthy(transceivers) if transceivers else unhealthy_transceiver_count(transceiver_ports),
         "vsx_status": vsx_status,
     }
     return summary
