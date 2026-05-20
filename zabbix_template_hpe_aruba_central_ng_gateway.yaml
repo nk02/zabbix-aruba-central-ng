@@ -820,164 +820,6 @@ zabbix_export:
         expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.uplink_count)>0 and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.uplink_down_count)=last(/HPE Aruba Central NG - DeviceType Switch/central.switch.uplink_count)
         name: 'Switch {HOST.NAME}: all uplinks are down'
         priority: HIGH
-    - uuid: a4c72c05e98d42d391ce9f1539fe3540
-      name: Switch LAG count
-      type: DEPENDENT
-      key: central.switch.lag_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.lag_count
-      master_item:
-        key: central.device.raw
-    - uuid: c00fb6efe1c14a7298b55e4761f38ff9
-      name: Switch stack member count
-      type: DEPENDENT
-      key: central.switch.stack_member_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.stack_member_count
-      master_item:
-        key: central.device.raw
-    - uuid: a1fd44a061974793b0fa9076176d0ec4
-      name: Switch VSX status
-      type: DEPENDENT
-      key: central.switch.vsx_status
-      value_type: CHAR
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.vsx_status
-      master_item:
-        key: central.device.raw
-      triggers:
-      - uuid: a2e8c7c8f44e45ff9a1b95c27c268182
-        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"ONLINE"
-        name: 'Switch {HOST.NAME}: VSX status is not online'
-        priority: WARNING
-        status: DISABLED
-    - uuid: 7aaf0e01af9349b58d593591112f57a3
-      name: Switch hardware component count
-      type: DEPENDENT
-      key: central.switch.hardware_component_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.hardware_component_count
-      master_item:
-        key: central.device.raw
-    - uuid: 18d36c7fe2c942e28d7433174e652f11
-      name: Switch fan count
-      type: DEPENDENT
-      key: central.switch.fan_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.fan_count
-      master_item:
-        key: central.device.raw
-    - uuid: f1f5bb4bc7174dc4ac9c9e49e9fed213
-      name: Switch failed fan count
-      type: DEPENDENT
-      key: central.switch.fan_failed_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.fan_failed_count
-      master_item:
-        key: central.device.raw
-      triggers:
-      - uuid: bd36f86be6c84ee9be880df78fe01ed6
-        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.fan_failed_count)>0
-        name: 'Switch {HOST.NAME}: one or more fans are unhealthy'
-        priority: HIGH
-    - uuid: 8bc4fd63f7eb4e01a13d06661507d261
-      name: Switch power supply count
-      type: DEPENDENT
-      key: central.switch.power_supply_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.power_supply_count
-      master_item:
-        key: central.device.raw
-    - uuid: 5a2767c544b740caa692dff24b1e1b30
-      name: Switch failed power supply count
-      type: DEPENDENT
-      key: central.switch.power_supply_failed_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.power_supply_failed_count
-      master_item:
-        key: central.device.raw
-      triggers:
-      - uuid: 169367f9dfe349ac8911a3ae8b29c5d6
-        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.power_supply_failed_count)>0
-        name: 'Switch {HOST.NAME}: one or more power supplies are unhealthy'
-        priority: HIGH
-    - uuid: 7269f00379aa4d8988cbb7085aeb1eb2
-      name: Switch management module count
-      type: DEPENDENT
-      key: central.switch.management_module_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.management_module_count
-      master_item:
-        key: central.device.raw
-    - uuid: 1d017f24882049d3821fddd4128a39e4
-      name: Switch failed management module count
-      type: DEPENDENT
-      key: central.switch.management_module_failed_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.management_module_failed_count
-      master_item:
-        key: central.device.raw
-      triggers:
-      - uuid: 9239dbde304c4ee7a80d8580c8ea1ccc
-        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.management_module_failed_count)>0
-        name: 'Switch {HOST.NAME}: one or more management modules are unhealthy'
-        priority: HIGH
-    - uuid: 1408bba9bbb44d04b9ab2511ded3e027
-      name: Switch transceiver count
-      type: DEPENDENT
-      key: central.switch.transceiver_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.transceiver_count
-      master_item:
-        key: central.device.raw
-    - uuid: 7087eeccdabd43c4a367a5eaf63f36df
-      name: Switch failed transceiver count
-      type: DEPENDENT
-      key: central.switch.transceiver_failed_count
-      value_type: UNSIGNED
-      preprocessing:
-      - type: JSONPATH
-        parameters:
-        - $.summary.transceiver_failed_count
-      master_item:
-        key: central.device.raw
-      triggers:
-      - uuid: b516084abf5849e4bd088142cdb3c093
-        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.transceiver_failed_count)>0
-        name: 'Switch {HOST.NAME}: one or more transceivers are unhealthy'
-        priority: WARNING
     - uuid: a73b7ffb99264164be0cd8b8910a5ae6
       name: Switch CRC error count
       type: DEPENDENT
@@ -1192,6 +1034,228 @@ zabbix_export:
         tags:
         - tag: component
           value: uplink
+    - uuid: 5463f537b0ac46cd9d1b33c3ef3668d5
+      name: Switch VSX discovery
+      type: DEPENDENT
+      key: central.switch.vsx.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.optional.vsx
+      lld_macro_paths:
+      - lld_macro: '{#FEATURE_ID}'
+        path: $.id
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: 39d8fb81973f42efbb10de0aaf4d6cd6
+        name: Switch VSX status
+        type: DEPENDENT
+        key: central.switch.vsx_status
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.vsx_status
+        master_item:
+          key: central.device.raw
+        triggers:
+        - uuid: 125581692e604dcdb7beb9a7d1fa1074
+          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"ONLINE"
+          name: 'Switch {HOST.NAME}: VSX status is not online'
+          priority: WARNING
+          status: DISABLED
+    - uuid: f9e52927343747b5904c5cf00396dc67
+      name: Switch LAG discovery
+      type: DEPENDENT
+      key: central.switch.lag.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.optional.lag
+      lld_macro_paths:
+      - lld_macro: '{#FEATURE_ID}'
+        path: $.id
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: 374321f71dfd43898891bf2c3183eac0
+        name: Switch LAG count
+        type: DEPENDENT
+        key: central.switch.lag_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.lag_count
+        master_item:
+          key: central.device.raw
+    - uuid: ac55fe756b03447493883d9e70239a93
+      name: Switch stack discovery
+      type: DEPENDENT
+      key: central.switch.stack.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.optional.stack
+      lld_macro_paths:
+      - lld_macro: '{#FEATURE_ID}'
+        path: $.id
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: aac9f3fdfa304c2facc8abb3747a19ab
+        name: Switch stack member count
+        type: DEPENDENT
+        key: central.switch.stack_member_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.stack_member_count
+        master_item:
+          key: central.device.raw
+    - uuid: 185b3e69060842238aa430c744f4e36f
+      name: Switch hardware discovery
+      type: DEPENDENT
+      key: central.switch.hardware.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.optional.hardware
+      lld_macro_paths:
+      - lld_macro: '{#FEATURE_ID}'
+        path: $.id
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: bd9835fa67a54d6f81fe8b4448ca7f83
+        name: Switch hardware component count
+        type: DEPENDENT
+        key: central.switch.hardware_component_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.hardware_component_count
+        master_item:
+          key: central.device.raw
+      - uuid: 19c1932c52e44fbe90631d8e81ed08b4
+        name: Switch fan count
+        type: DEPENDENT
+        key: central.switch.fan_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.fan_count
+        master_item:
+          key: central.device.raw
+      - uuid: ddce165be95043e0bd1bf6f19331cfe8
+        name: Switch failed fan count
+        type: DEPENDENT
+        key: central.switch.fan_failed_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.fan_failed_count
+        master_item:
+          key: central.device.raw
+        triggers:
+        - uuid: 2649d6c1a72f42a9a1ecc46c4e2df96e
+          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.fan_failed_count)>0
+          name: 'Switch {HOST.NAME}: one or more fans are unhealthy'
+          priority: HIGH
+      - uuid: 7269f00379aa4d8988cbb7085aeb1eb2
+        name: Switch power supply count
+        type: DEPENDENT
+        key: central.switch.power_supply_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.power_supply_count
+        master_item:
+          key: central.device.raw
+      - uuid: 1d017f24882049d3821fddd4128a39e4
+        name: Switch failed power supply count
+        type: DEPENDENT
+        key: central.switch.power_supply_failed_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.power_supply_failed_count
+        master_item:
+          key: central.device.raw
+        triggers:
+        - uuid: 9239dbde304c4ee7a80d8580c8ea1ccc
+          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.power_supply_failed_count)>0
+          name: 'Switch {HOST.NAME}: one or more power supplies are unhealthy'
+          priority: HIGH
+      - uuid: 1408bba9bbb44d04b9ab2511ded3e027
+        name: Switch management module count
+        type: DEPENDENT
+        key: central.switch.management_module_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.management_module_count
+        master_item:
+          key: central.device.raw
+      - uuid: 7087eeccdabd43c4a367a5eaf63f36df
+        name: Switch failed management module count
+        type: DEPENDENT
+        key: central.switch.management_module_failed_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.management_module_failed_count
+        master_item:
+          key: central.device.raw
+        triggers:
+        - uuid: b516084abf5849e4bd088142cdb3c093
+          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.management_module_failed_count)>0
+          name: 'Switch {HOST.NAME}: one or more management modules are unhealthy'
+          priority: HIGH
+      - uuid: 177916fab9e3489c9d7532c1f9491551
+        name: Switch transceiver count
+        type: DEPENDENT
+        key: central.switch.transceiver_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.transceiver_count
+        master_item:
+          key: central.device.raw
+      - uuid: ed65e648e57546e8aeec42d74d7a5d8d
+        name: Switch failed transceiver count
+        type: DEPENDENT
+        key: central.switch.transceiver_failed_count
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.transceiver_failed_count
+        master_item:
+          key: central.device.raw
+        triggers:
+        - uuid: f5a0b439a399434590ca47d5e9588c51
+          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.transceiver_failed_count)>0
+          name: 'Switch {HOST.NAME}: one or more transceivers are unhealthy'
+          priority: WARNING
     - uuid: b96552fa06894319b9f3d9db8520048e
       name: Switch interface discovery
       type: DEPENDENT

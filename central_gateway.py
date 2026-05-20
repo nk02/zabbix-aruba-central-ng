@@ -1757,6 +1757,30 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     return summary
 
 
+def optional_switch_discovery(summary: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    features: dict[str, list[dict[str, Any]]] = {
+        "vsx": [],
+        "lag": [],
+        "stack": [],
+        "hardware": [],
+    }
+    if str(summary.get("vsx_status") or "").strip():
+        features["vsx"].append({"id": "vsx", "name": "VSX"})
+    if int(summary.get("lag_count") or 0) > 0:
+        features["lag"].append({"id": "lag", "name": "LAG"})
+    if int(summary.get("stack_member_count") or 0) > 0:
+        features["stack"].append({"id": "stack", "name": "Stack"})
+    if any(int(summary.get(key) or 0) > 0 for key in (
+        "hardware_component_count",
+        "fan_count",
+        "power_supply_count",
+        "management_module_count",
+        "transceiver_count",
+    )):
+        features["hardware"].append({"id": "hardware", "name": "Hardware"})
+    return features
+
+
 def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
     kind = str(device["kind"])
     serial = str(device["serial"])
@@ -1842,13 +1866,16 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
     tenant = gateway_tenant_record(device)
     try:
         payload = collect_device_payload(config, workspace, tenant, device)
+        summary = normalize_summary(str(device["kind"]), payload, device)
         body = {
             "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
             "device": {k: v for k, v in device.items() if k != "central_base_url"},
-            "summary": normalize_summary(str(device["kind"]), payload, device),
+            "summary": summary,
             "uplinks": payload.get("uplinks") if isinstance(payload.get("uplinks"), list) else [],
             "data": payload,
         }
+        if str(device["kind"]) == "switch":
+            body["optional"] = optional_switch_discovery(summary)
         with HTTP_CACHE_LOCK:
             HTTP_CACHE[cache_key] = {"fetched_at": utc_now(), "body": body}
         return 200, body
