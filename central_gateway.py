@@ -579,6 +579,14 @@ def normalize_device(raw: dict[str, Any], workspace: dict[str, Any], tenant: dic
     }
 
 
+def merge_device_inventory(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in extra.items():
+        if value not in (None, "", [], {}):
+            merged[key] = value
+    return merged
+
+
 def device_kind(device: dict[str, Any]) -> str | None:
     device_type = str(device.get("device_type") or "").upper()
     if device_type == "ACCESS_POINT":
@@ -652,6 +660,26 @@ def device_key(workspace: dict[str, Any], tenant: dict[str, Any], kind: str, ser
     return ".".join(re.sub(r"[^A-Za-z0-9_-]", "_", part) for part in parts)
 
 
+def switch_inventory(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    records = get_all_pages(
+        config,
+        workspace,
+        tenant,
+        "/network-monitoring/v1/switches",
+        {
+            "fields": "status,macaddr,model,ip_address,firmware_version,uplink_ports,site",
+            "show_resource_details": "true",
+            "calculate_client_count": "true",
+        },
+    )
+    inventory: dict[str, dict[str, Any]] = {}
+    for record in records:
+        serial = str(first_value(record, "serialNumber", "serial", "id") or "")
+        if serial:
+            inventory[serial] = record
+    return inventory
+
+
 def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     devices: list[dict[str, Any]] = []
     state: dict[str, Any] = {"version": APP_VERSION, "generated_at": iso_now(), "devices": {}}
@@ -659,15 +687,44 @@ def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
         tenants = workspace_tenants(config, workspace)
         for tenant in tenants:
             allowed_kinds = configured_device_types(workspace, tenant)
+            switches_by_serial = switch_inventory(config, workspace, tenant) if "switch" in allowed_kinds else {}
             discovered = get_all_pages(config, workspace, tenant, "/network-monitoring/v1/devices")
             seen: set[str] = set()
             for raw in discovered:
+                serial_hint = str(first_value(raw, "serialNumber", "serial", "id") or "")
+                if serial_hint and serial_hint in switches_by_serial:
+                    raw = merge_device_inventory(raw, switches_by_serial[serial_hint])
                 device = normalize_device(raw, workspace, tenant)
                 kind = device_kind(device)
                 serial = str(device.get("serial") or "")
                 if not kind or kind not in allowed_kinds or not serial or serial in seen:
                     continue
                 seen.add(serial)
+                prefix = host_prefix(workspace, tenant)
+                host = device_host_name(prefix, device)
+                key = device_key(workspace, tenant, kind, serial)
+                device.update({"kind": kind, "host": host, "key": key, "host_prefix": prefix})
+                devices.append(device)
+                state["devices"][key] = {
+                    "key": key,
+                    "kind": kind,
+                    "serial": serial,
+                    "site_id": device.get("site_id"),
+                    "site_name": device.get("site_name"),
+                    "host": host,
+                    "workspace_id": str(workspace["workspace_id"]),
+                    "workspace_name": str(workspace.get("name") or workspace["workspace_id"]),
+                    "tenant_id": str(tenant["tenant_id"]),
+                    "tenant_name": str(tenant["tenant_name"]),
+                    "central_base_url": str(workspace["central_base_url"]),
+                }
+            for serial, raw in switches_by_serial.items():
+                if serial in seen:
+                    continue
+                device = normalize_device(raw, workspace, tenant)
+                kind = device_kind(device) or "switch"
+                if kind != "switch":
+                    continue
                 prefix = host_prefix(workspace, tenant)
                 host = device_host_name(prefix, device)
                 key = device_key(workspace, tenant, kind, serial)
@@ -1249,6 +1306,44 @@ def list_items(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def normalize_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def interface_identifier(record: dict[str, Any]) -> str:
+    for key in ("portNumber", "port_number", "interfaceId", "interface_id", "name", "portName", "port_name", "id"):
+        value = record.get(key)
+        if value not in (None, ""):
+            return str(value).strip()
+    return ""
+
+
+def matches_interface(record: dict[str, Any], wanted: Any) -> bool:
+    if wanted in (None, ""):
+        return False
+    wanted_text = str(wanted).strip()
+    wanted_normalized = normalize_token(wanted_text)
+    values = {
+        wanted_text,
+        wanted_normalized,
+    }
+    for key in ("portNumber", "port_number", "interfaceId", "interface_id", "name", "portName", "port_name", "id"):
+        value = record.get(key)
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        if text in values or normalize_token(text) in values:
+            return True
+    return False
+
+
+def truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "up", "online", "enabled"}
+
+
 def is_down_status(value: Any) -> bool:
     status = normalize_status(value)
     return bool(status and status not in ("ONLINE", "OK"))
@@ -1275,6 +1370,128 @@ def sum_numeric_fields(records: list[dict[str, Any]], names: tuple[str, ...]) ->
                 except (TypeError, ValueError):
                     pass
     return total
+
+
+def pick_numeric(record: dict[str, Any], names: tuple[str, ...]) -> int | None:
+    wanted = {name.lower() for name in names}
+    for key, value in record.items():
+        normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+        if any(name in normalized for name in wanted):
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def hardware_records(value: Any, *paths: tuple[str, ...]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for path in paths:
+        found = nested_value(value, path)
+        records.extend(list_items(found))
+    return records
+
+
+def count_unhealthy(records: list[dict[str, Any]]) -> int:
+    healthy = {"ONLINE", "OK", "UP", "PRESENT", "NORMAL", "IN_SYNC", "CONNECTED", "ACTIVE", "REDUNDANT"}
+    count = 0
+    for record in records:
+        status = normalize_status(first_value(record, "status", "health", "state", "operStatus", "presence"))
+        if status and status not in healthy:
+            count += 1
+    return count
+
+
+def extract_uplink_ids(device: dict[str, Any], details: dict[str, Any], lag_summary: Any, vsx_detail: Any) -> set[str]:
+    candidates: set[str] = set()
+    for source in (device.get("raw"), details, lag_summary, vsx_detail):
+        if not isinstance(source, dict):
+            continue
+        for key in ("uplink_ports", "uplinkPorts", "uplinks", "uplinkInterfaces", "uplink_interfaces"):
+            value = source.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        identifier = interface_identifier(item)
+                        if identifier:
+                            candidates.add(identifier)
+                    elif item not in (None, ""):
+                        candidates.add(str(item).strip())
+            elif value not in (None, ""):
+                candidates.add(str(value).strip())
+    for source in (lag_summary, vsx_detail):
+        if not isinstance(source, dict):
+            continue
+        for key in ("peerPort", "peer_port", "peerLinkPort", "peer_link_port", "islPort", "isl_port", "keepalivePort", "keepalive_port"):
+            value = first_value(source, key)
+            if value not in (None, ""):
+                candidates.add(str(value).strip())
+    return {candidate for candidate in candidates if candidate}
+
+
+def neighbour_map(neighbours: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    mapping: dict[str, list[dict[str, Any]]] = {}
+    for record in neighbours:
+        local_port = first_value(record, "port", "portName", "port_name", "localPort", "localPortName", "interface", "interfaceName")
+        if local_port in (None, ""):
+            continue
+        mapping.setdefault(str(local_port).strip(), []).append(record)
+    return mapping
+
+
+def is_probable_uplink(record: dict[str, Any], neighbours: list[dict[str, Any]]) -> bool:
+    if any(truthy(first_value(record, key)) for key in ("uplink", "isUplink", "uplinkPort", "is_uplink")):
+        return True
+    if any("uplink" in str(record.get(key) or "").lower() for key in ("role", "description", "name", "portName", "type")):
+        return True
+    if any(token in str(first_value(record, "type", "role", "description", "name") or "").lower() for token in ("trunk", "peer", "isl", "lag", "port-channel")):
+        return True
+    for neighbour in neighbours:
+        remote_type = str(first_value(neighbour, "deviceType", "neighborDeviceType", "neighbor_type", "type", "platform") or "").lower()
+        if any(token in remote_type for token in ("switch", "gateway", "router", "firewall")):
+            return True
+    return False
+
+
+def build_uplink_records(device: dict[str, Any], interfaces: list[dict[str, Any]], neighbours: list[dict[str, Any]], lag_summary: Any, vsx_detail: Any, details: dict[str, Any]) -> list[dict[str, Any]]:
+    explicit_ids = extract_uplink_ids(device, details, lag_summary, vsx_detail)
+    neighbours_by_port = neighbour_map(neighbours)
+    records: list[dict[str, Any]] = []
+    for interface in interfaces:
+        identifier = interface_identifier(interface)
+        local_neighbours = neighbours_by_port.get(identifier, [])
+        if not local_neighbours:
+            for key, items in neighbours_by_port.items():
+                if matches_interface(interface, key):
+                    local_neighbours = items
+                    break
+        is_uplink = any(matches_interface(interface, wanted) for wanted in explicit_ids) or is_probable_uplink(interface, local_neighbours)
+        if not is_uplink:
+            continue
+        speed = first_value(interface, "speed", "linkSpeed", "speedMbps", "linkSpeedMbps")
+        record = {
+            "id": identifier or str(len(records) + 1),
+            "name": str(first_value(interface, "name", "portName", "port_name", "interfaceName") or identifier or f"uplink-{len(records) + 1}"),
+            "status": normalize_status(first_value(interface, "status", "health", "operStatus", "linkStatus")),
+            "admin_status": normalize_status(first_value(interface, "adminStatus", "admin_state")),
+            "oper_status": normalize_status(first_value(interface, "operStatus", "linkStatus", "status")),
+            "speed_mbps": speed,
+            "crc_error_count": pick_numeric(interface, ("crc",)),
+            "drop_count": pick_numeric(interface, ("drop", "dropped")),
+            "error_count": pick_numeric(interface, ("error", "errors")),
+            "neighbor_count": len(local_neighbours),
+            "neighbor_name": str(first_value(local_neighbours[0], "neighborName", "deviceName", "hostname", "name") or "") if local_neighbours else "",
+            "neighbor_type": str(first_value(local_neighbours[0], "deviceType", "neighborDeviceType", "type", "platform") or "") if local_neighbours else "",
+        }
+        records.append(record)
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for record in records:
+        record_id = str(record.get("id") or "")
+        if record_id and record_id not in seen:
+            deduped.append(record)
+            seen.add(record_id)
+    return sorted(deduped, key=lambda item: str(item.get("name") or item.get("id") or ""))
 
 
 def firmware_filter(serial: str) -> str:
@@ -1340,6 +1557,8 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     stack_members = payload.get("stack_members")
     hardware_trends = payload.get("hardware_trends")
     vsx_detail = payload.get("vsx_detail")
+    neighbours = list_items(payload.get("neighbours"))
+    uplinks = list_items(payload.get("uplinks"))
     client_count = first_value(
         first_stats,
         "clientCount",
@@ -1368,6 +1587,10 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         count_payload_records(hardware_trends),
         count_payload_records(first_nested_value(hardware_trends, [("fans",), ("powerSupplies",), ("managementModules",)])),
     )
+    fans = hardware_records(hardware_trends, ("fans",), ("summary", "fans"))
+    power_supplies = hardware_records(hardware_trends, ("powerSupplies",), ("power_supplies",), ("summary", "powerSupplies"))
+    management_modules = hardware_records(hardware_trends, ("managementModules",), ("management_modules",), ("summary", "managementModules"))
+    transceivers = hardware_records(hardware_trends, ("transceivers",), ("optics",), ("summary", "transceivers"))
     error_count = len([name for name in (payload.get("errors") or {}) if name])
     summary = {
         "kind": kind,
@@ -1398,12 +1621,26 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "client_count": client_count,
         "interface_down_count": count_down(interfaces),
         "interface_count": len(interfaces),
+        "neighbour_count": len(neighbours),
+        "uplink_count": len(uplinks),
+        "uplink_down_count": count_down(uplinks),
+        "uplink_crc_error_count": sum_numeric_fields(uplinks, ("crc",)),
+        "uplink_drop_count": sum_numeric_fields(uplinks, ("drop", "dropped")),
+        "uplink_error_count": sum_numeric_fields(uplinks, ("error", "errors")),
         "crc_error_count": sum_numeric_fields(ports + interfaces, ("crc",)),
         "drop_count": sum_numeric_fields(ports + interfaces, ("drop", "dropped")),
         "error_count": sum_numeric_fields(ports + interfaces, ("error", "errors")),
         "lag_count": count_payload_records(lag_summary),
         "stack_member_count": count_payload_records(stack_members),
         "hardware_component_count": hardware_member_count,
+        "fan_count": len(fans),
+        "fan_failed_count": count_unhealthy(fans),
+        "power_supply_count": len(power_supplies),
+        "power_supply_failed_count": count_unhealthy(power_supplies),
+        "management_module_count": len(management_modules),
+        "management_module_failed_count": count_unhealthy(management_modules),
+        "transceiver_count": len(transceivers),
+        "transceiver_failed_count": count_unhealthy(transceivers),
         "vsx_status": vsx_status,
     }
     return summary
@@ -1451,6 +1688,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
             "hardware_trends": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/hardware-trends",
             "lag_summary": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/lag-summary",
             "vsx_detail": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/vsx",
+            "neighbours": f"/network-monitoring/v1/neighbours/{quote(serial)}",
         }
         if stack_id:
             extra_paths["stack_members"] = f"/network-monitoring/v1alpha1/stack/{quote(str(stack_id))}/members"
@@ -1459,6 +1697,14 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
             payload[name] = value or {}
             if endpoint_error:
                 payload["errors"][name] = endpoint_error
+        payload["uplinks"] = build_uplink_records(
+            device,
+            interfaces,
+            list_items(payload.get("neighbours")),
+            payload.get("lag_summary"),
+            payload.get("vsx_detail"),
+            detail_data,
+        )
     elif kind == "gateway":
         ports, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1/gateways/{quote(serial)}/ports", query)
         payload["ports"] = ports
@@ -1489,6 +1735,7 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
             "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
             "device": {k: v for k, v in device.items() if k != "central_base_url"},
             "summary": normalize_summary(str(device["kind"]), payload, device),
+            "uplinks": payload.get("uplinks") if isinstance(payload.get("uplinks"), list) else [],
             "data": payload,
         }
         with HTTP_CACHE_LOCK:
