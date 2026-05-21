@@ -605,7 +605,7 @@ def safe_name(value: str) -> str:
 
 def safe_zabbix_host_name(value: str) -> str:
     value = safe_name(value)
-    value = re.sub(r"[^A-Za-z0-9 _.-]", "_", value)
+    value = re.sub(r"[^A-Za-z0-9 _.-]", "-", value)
     value = re.sub(r"\s+", " ", value).strip()
     return value or "Unnamed"
 
