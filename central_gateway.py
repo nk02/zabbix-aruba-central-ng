@@ -1828,6 +1828,17 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     transceivers = hardware_records(hardware_trends, ("transceivers",), ("optics",), ("summary", "transceivers"))
     transceiver_ports = transceiver_interfaces(interfaces)
     error_count = len([name for name in (payload.get("errors") or {}) if name])
+    summary_status = normalize_status(
+        first_value(
+            data,
+            "status",
+            "health",
+            "operStatus",
+            "operationalStatus",
+        )
+        or first_value(raw, "status", "health", "operStatus", "operationalStatus")
+        or device.get("status")
+    )
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
@@ -1837,7 +1848,7 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "ipv4": data.get("ipv4"),
         "site_id": first_value(data, "siteId", "site_id") or device.get("site_id"),
         "site_name": first_value(data, "siteName", "site") or device.get("site_name"),
-        "status": normalize_status(first_value(data, "status", "health")),
+        "status": summary_status,
         "firmware": first_value(data, "firmwareVersion", "softwareVersion"),
         "uptime_in_millis": data.get("uptimeInMillis") if data.get("uptimeInMillis") not in (None, "") else first_value(data, "upTime"),
         "uptime_seconds": millis_to_seconds(data.get("uptimeInMillis")) if data.get("uptimeInMillis") not in (None, "") else millis_to_seconds(first_value(data, "upTime")),
