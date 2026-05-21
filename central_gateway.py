@@ -1581,9 +1581,9 @@ def build_uplink_records(device: dict[str, Any], interfaces: list[dict[str, Any]
         record = {
             "id": identifier or str(len(records) + 1),
             "name": str(first_value(interface, "name", "portName", "port_name", "interfaceName") or identifier or f"uplink-{len(records) + 1}"),
-            "status": normalize_status(first_value(interface, "status", "health", "operStatus", "linkStatus")),
-            "admin_status": normalize_status(first_value(interface, "adminStatus", "admin_state")),
-            "oper_status": normalize_status(first_value(interface, "operStatus", "linkStatus", "status")),
+            "link_status": str(first_value(interface, "status", "health", "linkStatus") or ""),
+            "admin_state": str(first_value(interface, "adminStatus", "admin_state") or ""),
+            "oper_state": str(first_value(interface, "operStatus", "linkStatus", "status") or ""),
             "speed_mbps": speed_value,
             "crc_error_count": pick_numeric(interface, ("crc",)),
             "drop_count": pick_numeric(interface, ("drop", "dropped")),

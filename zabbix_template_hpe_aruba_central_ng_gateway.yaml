@@ -895,14 +895,14 @@ zabbix_export:
         key: central.device.raw
       item_prototypes:
       - uuid: fe76ddd33d814db1ae62b15fc9676ef3
-        name: 'Switch uplink {#UPLINK_NAME}: status'
+        name: 'Switch uplink {#UPLINK_NAME}: link status'
         type: DEPENDENT
         key: 'central.switch.uplink.status[{#UPLINK_ID}]'
         value_type: CHAR
         preprocessing:
         - type: JSONPATH
           parameters:
-          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].status.first()'
+          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].link_status.first()'
         master_item:
           key: central.device.raw
         tags:
@@ -910,43 +910,42 @@ zabbix_export:
           value: uplink
         trigger_prototypes:
         - uuid: 9d62ba45d73e440f838038cb85b98585
-          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.uplink.status[{#UPLINK_ID}])<>"ONLINE"'
-          name: 'Switch {HOST.NAME}: uplink {#UPLINK_NAME} is not online'
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.uplink.oper_status[{#UPLINK_ID}])<>"Up"'
+          name: 'Switch {HOST.NAME}: uplink {#UPLINK_NAME} operational state is not Up'
           priority: WARNING
       - uuid: c81458d6ce344f239f764b78a5c5b364
-        name: 'Switch uplink {#UPLINK_NAME}: admin status'
+        name: 'Switch uplink {#UPLINK_NAME}: admin state'
         type: DEPENDENT
         key: 'central.switch.uplink.admin_status[{#UPLINK_ID}]'
         value_type: CHAR
         preprocessing:
         - type: JSONPATH
           parameters:
-          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].admin_status.first()'
+          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].admin_state.first()'
         master_item:
           key: central.device.raw
         tags:
         - tag: component
           value: uplink
       - uuid: 56bc73d2f9be41e08fcf371c419a76f6
-        name: 'Switch uplink {#UPLINK_NAME}: operational status'
+        name: 'Switch uplink {#UPLINK_NAME}: operational state'
         type: DEPENDENT
         key: 'central.switch.uplink.oper_status[{#UPLINK_ID}]'
         value_type: CHAR
         preprocessing:
         - type: JSONPATH
           parameters:
-          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].oper_status.first()'
+          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].oper_state.first()'
         master_item:
           key: central.device.raw
         tags:
         - tag: component
           value: uplink
       - uuid: f7ad6f48c8554e03ba0278bbbbeaa60d
-        name: 'Switch uplink {#UPLINK_NAME}: speed'
+        name: 'Switch uplink {#UPLINK_NAME}: speed (Mbps)'
         type: DEPENDENT
         key: 'central.switch.uplink.speed_mbps[{#UPLINK_ID}]'
         value_type: FLOAT
-        units: Mbps
         preprocessing:
         - type: JSONPATH
           parameters:
@@ -1421,11 +1420,10 @@ zabbix_export:
         - tag: component
           value: interface
       - uuid: ff36c0c9cb7b435e870b7f67198cb259
-        name: 'Switch interface {#IF_NAME}: speed'
+        name: 'Switch interface {#IF_NAME}: speed (Mbps)'
         type: DEPENDENT
         key: 'central.switch.interface.speed[{#IF_ID}]'
         value_type: FLOAT
-        units: Mbps
         status: DISABLED
         preprocessing:
         - type: JSONPATH
