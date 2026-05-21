@@ -16,9 +16,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.10"
+APP_VERSION = "2.0.11"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.10"
+TEMPLATE_VERSION = "2.0.11"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -642,9 +642,24 @@ def device_host_name(prefix: str, device: dict[str, Any]) -> str:
     return safe_name(f"{prefix} - {device.get('name') or device.get('serial')}")
 
 
+def safe_zabbix_host_name(value: str) -> str:
+    value = safe_name(value)
+    value = re.sub(r"[^A-Za-z0-9 _.-]", "-", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value or "Unnamed"
+
+
+def device_zabbix_host_name(prefix: str, device: dict[str, Any]) -> str:
+    return safe_zabbix_host_name(device_host_name(prefix, device))
+
+
 def site_host_name(prefix: str, site_name: Any, site_id: Any) -> str:
     name = str(site_name or "").strip() or f"Site {site_id}"
     return safe_name(f"{prefix} - GLOBAL SITE - {name}")
+
+
+def site_zabbix_host_name(prefix: str, site_name: Any, site_id: Any) -> str:
+    return safe_zabbix_host_name(site_host_name(prefix, site_name, site_id))
 
 
 def device_key(workspace: dict[str, Any], tenant: dict[str, Any], kind: str, serial: str) -> str:
@@ -669,9 +684,10 @@ def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
                     continue
                 seen.add(serial)
                 prefix = host_prefix(workspace, tenant)
-                host = device_host_name(prefix, device)
+                host = device_zabbix_host_name(prefix, device)
+                visible_name = device_host_name(prefix, device)
                 key = device_key(workspace, tenant, kind, serial)
-                device.update({"kind": kind, "host": host, "key": key, "host_prefix": prefix})
+                device.update({"kind": kind, "host": host, "visible_name": visible_name, "key": key, "host_prefix": prefix})
                 devices.append(device)
                 state["devices"][key] = {
                     "key": key,
@@ -680,6 +696,7 @@ def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
                     "site_id": device.get("site_id"),
                     "site_name": device.get("site_name"),
                     "host": host,
+                    "visible_name": visible_name,
                     "workspace_id": str(workspace["workspace_id"]),
                     "workspace_name": str(workspace.get("name") or workspace["workspace_id"]),
                     "tenant_id": str(tenant["tenant_id"]),
@@ -1142,10 +1159,11 @@ def build_host_plans(config: dict[str, Any], devices: list[dict[str, Any]]) -> l
         site_id = str(device.get("site_id") or "")
         if site_id:
             site_key = f"{device.get('workspace_id')}:{device.get('tenant_id')}:{site_id}"
+            prefix = str(device.get("host_prefix") or device.get("tenant_name") or "Central")
             sites.setdefault(site_key, {
                 "kind": "site",
-                "host": site_host_name(str(device.get("host_prefix") or device.get("tenant_name") or "Central"), device.get("site_name"), site_id),
-                "visible_name": site_host_name(str(device.get("host_prefix") or device.get("tenant_name") or "Central"), device.get("site_name"), site_id),
+                "host": site_zabbix_host_name(prefix, device.get("site_name"), site_id),
+                "visible_name": site_host_name(prefix, device.get("site_name"), site_id),
                 "template": templates["site"],
                 "site_id": site_id,
             })
@@ -1153,7 +1171,7 @@ def build_host_plans(config: dict[str, Any], devices: list[dict[str, Any]]) -> l
         plans.append({
             "kind": kind,
             "host": device["host"],
-            "visible_name": device["host"],
+            "visible_name": device.get("visible_name") or device["host"],
             "template": templates[kind],
             "device_key": device["key"],
             "serial": device.get("serial"),
