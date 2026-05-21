@@ -973,6 +973,7 @@ def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[
             "template_groups": {"createMissing": False},
             "templates": {"createMissing": True, "updateExisting": True},
             "items": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
+            "discoveryRules": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
             "triggers": {"createMissing": True, "updateExisting": True, "deleteMissing": True},
             "valueMaps": {"createMissing": True, "updateExisting": True},
         },
@@ -1602,6 +1603,24 @@ def build_uplink_records(device: dict[str, Any], interfaces: list[dict[str, Any]
     return sorted(deduped, key=lambda item: str(item.get("name") or item.get("id") or ""))
 
 
+def normalize_interface_records(interfaces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for interface in interfaces:
+        record = dict(interface)
+        speed = first_value(interface, "speed", "linkSpeed", "speedMbps", "linkSpeedMbps")
+        try:
+            speed_value = float(speed) if speed not in (None, "") else None
+        except (TypeError, ValueError):
+            speed_value = None
+        if speed_value is not None and speed_value > 100000:
+            speed_value = speed_value / 1000000
+        record["speedMbps"] = speed_value
+        record["neighbourTopologyType"] = first_value(interface, "neighbourType", "neighbourFamily")
+        record["neighbourVendor"] = first_value(interface, "neighbourFunction")
+        normalized.append(record)
+    return normalized
+
+
 def firmware_filter(serial: str) -> str:
     return f"serialNumber eq '{serial}'"
 
@@ -1817,7 +1836,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
                 payload["errors"][name] = error
     elif kind == "switch":
         interfaces, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1alpha1/switch/{quote(serial)}/interfaces", query)
-        payload["interfaces"] = interfaces
+        payload["interfaces"] = normalize_interface_records(interfaces)
         if error:
             payload["errors"]["interfaces"] = error
         detail_data = payload["details"] if isinstance(payload.get("details"), dict) else {}
@@ -1837,7 +1856,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
                 payload["errors"][name] = endpoint_error
         payload["uplinks"] = build_uplink_records(
             device,
-            interfaces,
+            payload["interfaces"],
             list_items(payload.get("neighbours")),
             payload.get("lag_summary"),
             payload.get("vsx_detail"),

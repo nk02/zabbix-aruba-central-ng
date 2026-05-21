@@ -1053,7 +1053,7 @@ zabbix_export:
       - uuid: 39d8fb81973f42efbb10de0aaf4d6cd6
         name: Switch VSX status
         type: DEPENDENT
-        key: central.switch.vsx_status
+        key: 'central.switch.vsx_status[{#FEATURE_ID}]'
         value_type: CHAR
         preprocessing:
         - type: JSONPATH
@@ -1063,7 +1063,7 @@ zabbix_export:
           key: central.device.raw
         trigger_prototypes:
         - uuid: 125581692e604dcdb7beb9a7d1fa1074
-          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status)<>"ONLINE"
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status[{#FEATURE_ID}])<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.vsx_status[{#FEATURE_ID}])<>"ONLINE"'
           name: 'Switch {HOST.NAME}: VSX status is not online'
           priority: WARNING
           status: DISABLED
@@ -1086,7 +1086,7 @@ zabbix_export:
       - uuid: 374321f71dfd43898891bf2c3183eac0
         name: Switch LAG count
         type: DEPENDENT
-        key: central.switch.lag_count
+        key: 'central.switch.lag_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1113,7 +1113,7 @@ zabbix_export:
       - uuid: aac9f3fdfa304c2facc8abb3747a19ab
         name: Switch stack member count
         type: DEPENDENT
-        key: central.switch.stack_member_count
+        key: 'central.switch.stack_member_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1140,7 +1140,7 @@ zabbix_export:
       - uuid: bd9835fa67a54d6f81fe8b4448ca7f83
         name: Switch fan count
         type: DEPENDENT
-        key: central.switch.fan_count
+        key: 'central.switch.fan_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1151,7 +1151,7 @@ zabbix_export:
       - uuid: ddce165be95043e0bd1bf6f19331cfe8
         name: Switch failed fan count
         type: DEPENDENT
-        key: central.switch.fan_failed_count
+        key: 'central.switch.fan_failed_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1161,7 +1161,7 @@ zabbix_export:
           key: central.device.raw
         trigger_prototypes:
         - uuid: 2649d6c1a72f42a9a1ecc46c4e2df96e
-          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.fan_failed_count)>0
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.fan_failed_count[{#FEATURE_ID}])>0'
           name: 'Switch {HOST.NAME}: one or more fans are unhealthy'
           priority: HIGH
     - uuid: 7269f00379aa4d8988cbb7085aeb1eb2
@@ -1183,7 +1183,7 @@ zabbix_export:
       - uuid: 1ffb730f98fa4fabaa04e1a8e9a829ba
         name: Switch power supply count
         type: DEPENDENT
-        key: central.switch.power_supply_count
+        key: 'central.switch.power_supply_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1194,7 +1194,7 @@ zabbix_export:
       - uuid: 1d017f24882049d3821fddd4128a39e4
         name: Switch failed power supply count
         type: DEPENDENT
-        key: central.switch.power_supply_failed_count
+        key: 'central.switch.power_supply_failed_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1204,7 +1204,7 @@ zabbix_export:
           key: central.device.raw
         trigger_prototypes:
         - uuid: 9239dbde304c4ee7a80d8580c8ea1ccc
-          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.power_supply_failed_count)>0
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.power_supply_failed_count[{#FEATURE_ID}])>0'
           name: 'Switch {HOST.NAME}: one or more power supplies are unhealthy'
           priority: HIGH
     - uuid: 1408bba9bbb44d04b9ab2511ded3e027
@@ -1226,7 +1226,7 @@ zabbix_export:
       - uuid: 0d2d5b313b8d4dc282d9702d186e947a
         name: Switch management module count
         type: DEPENDENT
-        key: central.switch.management_module_count
+        key: 'central.switch.management_module_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1237,7 +1237,7 @@ zabbix_export:
       - uuid: 7087eeccdabd43c4a367a5eaf63f36df
         name: Switch failed management module count
         type: DEPENDENT
-        key: central.switch.management_module_failed_count
+        key: 'central.switch.management_module_failed_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1247,7 +1247,7 @@ zabbix_export:
           key: central.device.raw
         trigger_prototypes:
         - uuid: b516084abf5849e4bd088142cdb3c093
-          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.management_module_failed_count)>0
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.management_module_failed_count[{#FEATURE_ID}])>0'
           name: 'Switch {HOST.NAME}: one or more management modules are unhealthy'
           priority: HIGH
     - uuid: 177916fab9e3489c9d7532c1f9491551
@@ -1269,7 +1269,7 @@ zabbix_export:
       - uuid: df65a3e19b0a4c4b8aac76289c22ab16
         name: Switch hardware component count
         type: DEPENDENT
-        key: central.switch.hardware_component_count
+        key: 'central.switch.hardware_component_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1280,7 +1280,7 @@ zabbix_export:
       - uuid: be7cb4f4fccf4202996092eaba264047
         name: Switch transceiver count
         type: DEPENDENT
-        key: central.switch.transceiver_count
+        key: 'central.switch.transceiver_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1291,7 +1291,7 @@ zabbix_export:
       - uuid: ed65e648e57546e8aeec42d74d7a5d8d
         name: Switch failed transceiver count
         type: DEPENDENT
-        key: central.switch.transceiver_failed_count
+        key: 'central.switch.transceiver_failed_count[{#FEATURE_ID}]'
         value_type: UNSIGNED
         preprocessing:
         - type: JSONPATH
@@ -1301,7 +1301,7 @@ zabbix_export:
           key: central.device.raw
         trigger_prototypes:
         - uuid: f5a0b439a399434590ca47d5e9588c51
-          expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.transceiver_failed_count)>0
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.transceiver_failed_count[{#FEATURE_ID}])>0'
           name: 'Switch {HOST.NAME}: one or more transceivers are unhealthy'
           priority: WARNING
     - uuid: b96552fa06894319b9f3d9db8520048e
@@ -1378,12 +1378,12 @@ zabbix_export:
         type: DEPENDENT
         key: 'central.switch.interface.speed[{#IF_ID}]'
         value_type: FLOAT
-        units: bps
+        units: Mbps
         status: DISABLED
         preprocessing:
         - type: JSONPATH
           parameters:
-          - '$.data.interfaces[?(@.id == "{#IF_ID}")].speed.first()'
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].speedMbps.first()'
         master_item:
           key: central.device.raw
         tags:
@@ -1462,6 +1462,36 @@ zabbix_export:
         - type: JSONPATH
           parameters:
           - '$.data.interfaces[?(@.id == "{#IF_ID}")].neighbour.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: 13411d457116456dbf194de333f98594
+        name: 'Switch interface {#IF_NAME}: neighbour topology type'
+        type: DEPENDENT
+        key: 'central.switch.interface.neighbour_topology_type[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].neighbourTopologyType.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: interface
+      - uuid: 1db4213f82ab436f8a4a9d10552b5423
+        name: 'Switch interface {#IF_NAME}: neighbour vendor'
+        type: DEPENDENT
+        key: 'central.switch.interface.neighbour_vendor[{#IF_ID}]'
+        value_type: CHAR
+        status: DISABLED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.interfaces[?(@.id == "{#IF_ID}")].neighbourVendor.first()'
         master_item:
           key: central.device.raw
         tags:
