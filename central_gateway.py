@@ -896,6 +896,30 @@ def existing_template_object_statuses(config: dict[str, Any], names: list[str]) 
     return statuses
 
 
+def existing_template_macros(config: dict[str, Any], names: list[str]) -> dict[str, dict[str, str]]:
+    if not names:
+        return {}
+    templates = zabbix_api_call(config, "template.get", {
+        "output": ["templateid", "host"],
+        "selectMacros": "extend",
+        "filter": {"host": names},
+    })
+    result: dict[str, dict[str, str]] = {}
+    for template in templates or []:
+        if not isinstance(template, dict):
+            continue
+        macro_values: dict[str, str] = {}
+        for macro in template.get("macros") or []:
+            if not isinstance(macro, dict):
+                continue
+            macro_name = str(macro.get("macro") or "").strip()
+            if not macro_name or macro_name == "{$CENTRAL.TEMPLATE.VERSION}":
+                continue
+            macro_values[macro_name] = str(macro.get("value") or "")
+        result[str(template.get("host") or "")] = macro_values
+    return result
+
+
 def render_template_group_header(records: dict[str, dict[str, Any]], names: list[str]) -> str:
     lines = ["  template_groups:"]
     for name in names:
@@ -944,12 +968,68 @@ def apply_preserved_statuses(source: str, statuses: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def apply_preserved_template_macros(source: str, template_macros: dict[str, dict[str, str]]) -> str:
+    if not template_macros:
+        return source
+    lines = source.splitlines()
+    template_blocks: list[tuple[int, int, str]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*)-\s*uuid:\s*([0-9a-f]{32})\s*$", line)
+        if not match:
+            continue
+        block_indent = len(match.group(1))
+        template_name = ""
+        for probe in range(index + 1, min(index + 8, len(lines))):
+            template_match = re.match(rf"^\s{{{block_indent + 2}}}template:\s+(.+?)\s*$", lines[probe])
+            if template_match:
+                template_name = template_match.group(1)
+                break
+        if template_name:
+            template_blocks.append((index, block_indent, template_name))
+    for position in range(len(template_blocks) - 1, -1, -1):
+        start, block_indent, template_name = template_blocks[position]
+        desired_macros = template_macros.get(template_name) or {}
+        if not desired_macros:
+            continue
+        block_end = len(lines)
+        for next_start, next_indent, _ in template_blocks[position + 1:]:
+            if next_indent <= block_indent:
+                block_end = next_start
+                break
+        macros_index = None
+        for probe in range(start + 1, block_end):
+            if re.match(rf"^\s{{{block_indent + 2}}}macros:\s*$", lines[probe]):
+                macros_index = probe
+                break
+        if macros_index is None:
+            continue
+        probe = macros_index + 1
+        while probe < block_end:
+            macro_match = re.match(rf"^\s{{{block_indent + 2}}}-\s*macro:\s+'(\{{\$.+?\}})'\s*$", lines[probe])
+            if macro_match:
+                macro_name = macro_match.group(1)
+                desired_value = desired_macros.get(macro_name)
+                if desired_value is not None:
+                    value_index = None
+                    for inner in range(probe + 1, block_end):
+                        if re.match(rf"^\s{{{block_indent + 2}}}-\s*macro:\s+'", lines[inner]):
+                            break
+                        if re.match(rf"^\s{{{block_indent + 4}}}value:\s*", lines[inner]):
+                            value_index = inner
+                            break
+                    if value_index is not None:
+                        lines[value_index] = " " * (block_indent + 4) + f"value: {yaml_scalar(desired_value)}"
+            probe += 1
+    return "\n".join(lines) + "\n"
+
+
 def render_zabbix_template_source(config: dict[str, Any]) -> tuple[str, list[str]]:
     source = TEMPLATE_PATH.read_text(encoding="utf-8")
     names = template_names()
     configured_group = zabbix_template_group(config)
     existing_groups = existing_template_groups(config, names)
     existing_statuses = existing_template_object_statuses(config, names)
+    existing_macros = existing_template_macros(config, names)
     all_group_names = sorted({configured_group, *(group for groups in existing_groups.values() for group in groups)})
     records = template_group_records(config, all_group_names)
     missing = [name for name in all_group_names if name not in records]
@@ -977,6 +1057,7 @@ def render_zabbix_template_source(config: dict[str, Any]) -> tuple[str, list[str
 
     source = re.sub(r"(?ms)^  - uuid: .*?(?=^  - uuid: |\Z)", replace_template_block, source)
     source = apply_preserved_statuses(source, existing_statuses)
+    source = apply_preserved_template_macros(source, existing_macros)
     return source, all_group_names
 
 
