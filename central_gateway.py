@@ -1617,6 +1617,11 @@ def normalize_interface_records(interfaces: list[dict[str, Any]]) -> list[dict[s
         record["speedMbps"] = speed_value
         record["neighbourTopologyType"] = first_value(interface, "neighbourType", "neighbourFamily")
         record["neighbourVendor"] = first_value(interface, "neighbourFunction")
+        record["lldUplink"] = "true" if truthy(first_value(interface, "uplink")) else "false"
+        record["lldConnector"] = str(first_value(interface, "connector") or "")
+        record["lldNeighbour"] = str(first_value(interface, "neighbour") or "")
+        record["lldNeighbourTopologyType"] = str(first_value(record, "neighbourTopologyType") or "")
+        record["lldTransceiverStatus"] = str(first_value(interface, "transceiverStatus") or "")
         normalized.append(record)
     return normalized
 

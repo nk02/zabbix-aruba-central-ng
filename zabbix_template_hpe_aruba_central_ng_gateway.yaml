@@ -588,6 +588,10 @@ zabbix_export:
     macros:
     - macro: '{$CENTRAL.SWITCH.POLL_INTERVAL}'
       value: 5m
+    - macro: '{$CENTRAL.SWITCH.INTERFACE.BASIC.MATCHES}'
+      value: a^
+    - macro: '{$CENTRAL.SWITCH.INTERFACE.ADVANCED.MATCHES}'
+      value: a^
     items:
     - uuid: 0bd8a1e829d046fca0e15f1f4a09be04
       name: Switch raw master item
@@ -1319,8 +1323,51 @@ zabbix_export:
         path: $.id
       - lld_macro: '{#IF_NAME}'
         path: $.name
+      - lld_macro: '{#IF_CONNECTOR}'
+        path: $.lldConnector
+      - lld_macro: '{#IF_UPLINK}'
+        path: $.lldUplink
+      - lld_macro: '{#IF_NEIGHBOUR}'
+        path: $.lldNeighbour
+      - lld_macro: '{#IF_TOPOLOGY_TYPE}'
+        path: $.lldNeighbourTopologyType
+      - lld_macro: '{#IF_TRANSCEIVER_STATUS}'
+        path: $.lldTransceiverStatus
       master_item:
         key: central.device.raw
+      overrides:
+      - name: Enable selected switch interfaces - basic items
+        step: '1'
+        filter:
+          evaltype: AND
+          conditions:
+          - macro: '{#IF_NAME}'
+            value: '{$CENTRAL.SWITCH.INTERFACE.BASIC.MATCHES}'
+            operator: MATCHES_REGEX
+            formulaid: A
+        operations:
+        - operationobject: ITEM_PROTOTYPE
+          operator: REGEXP
+          value: '^Switch interface .*: (status|operational status|speed|neighbour|neighbour topology type|neighbour vendor)$'
+          status: ENABLED
+      - name: Enable selected switch interfaces - advanced items and triggers
+        step: '2'
+        filter:
+          evaltype: AND
+          conditions:
+          - macro: '{#IF_NAME}'
+            value: '{$CENTRAL.SWITCH.INTERFACE.ADVANCED.MATCHES}'
+            operator: MATCHES_REGEX
+            formulaid: A
+        operations:
+        - operationobject: ITEM_PROTOTYPE
+          operator: REGEXP
+          value: '^Switch interface .*: (CRC error count|packet drop count|error count|transceiver status|transceiver model|connector|admin status)$'
+          status: ENABLED
+        - operationobject: TRIGGER_PROTOTYPE
+          operator: REGEXP
+          value: '^Switch \\{HOST\\.NAME\\}: interface .*'
+          status: ENABLED
       item_prototypes:
       - uuid: 085afe881ca34e00ac571cd7d33f8be0
         name: 'Switch interface {#IF_NAME}: status'
