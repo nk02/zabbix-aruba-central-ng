@@ -364,7 +364,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 503c17b27f2d443b93715ebe60b3e856
-        expression: last(/HPE Aruba Central NG - DeviceType AP/central.device.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.device.status)="OFFLINE"
         name: 'AP {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 9dfed9f0f56043338837c2bfb6cf5926
@@ -630,7 +630,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: e0ff0cc5f7d049a8bc5e734d5271dd26
-        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.status)="OFFLINE"
         name: 'Switch {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 5beca6b1cf1741d79fb08e131f1cb465
@@ -924,7 +924,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 35f4ab4a7e0841899c69f2206918249a
-        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)<>"ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)="OFFLINE"
         name: 'Gateway {HOST.NAME}: not online'
         priority: HIGH
     - uuid: 54b9b45843c340f8a0aa24576802ccec
