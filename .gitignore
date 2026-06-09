@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 .token_cache.json
 gateway_state.json
+gateway.log
+.gateway_cache.json

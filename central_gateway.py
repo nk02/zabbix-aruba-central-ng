@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import concurrent.futures
 import json
+import logging
+from logging.handlers import RotatingFileHandler
+import http.client
+import io
 import os
 import re
 import ssl
@@ -29,12 +34,111 @@ EXAMPLE_CONFIG_PATH = Path(__file__).with_name("workspaces.example.json")
 TOKEN_CACHE_PATH = Path(__file__).with_name(".token_cache.json")
 GATEWAY_STATE_PATH = Path(__file__).with_name("gateway_state.json")
 TEMPLATE_PATH = Path(__file__).with_name("zabbix_template_hpe_aruba_central_ng_gateway.yaml")
+HTTP_CACHE_PATH = Path(__file__).with_name(".gateway_cache.json")
 
 RATE_LIMIT_LOCK = threading.Lock()
 RATE_LIMIT_WINDOW = 0.0
 RATE_LIMIT_COUNT = 0
 HTTP_CACHE_LOCK = threading.Lock()
 HTTP_CACHE: dict[str, dict[str, Any]] = {}
+
+
+LOGGER = logging.getLogger("aruba_gateway")
+
+
+def configure_logging(config: dict[str, Any]) -> None:
+    gateway = config_section(config, "gateway")
+    log_level_name = str(gateway.get("log_level") or "INFO").upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+    LOGGER.setLevel(log_level)
+    LOGGER.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(formatter)
+    LOGGER.addHandler(stream_handler)
+
+    log_file = gateway.get("log_file") or "gateway.log"
+    try:
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=int(gateway.get("log_max_bytes") or 10 * 1024 * 1024),
+            backupCount=int(gateway.get("log_backup_count") or 3),
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        LOGGER.addHandler(file_handler)
+    except Exception as exc:
+        LOGGER.warning(f"Could not configure file logging to {log_file}: {exc}")
+
+
+def load_http_cache() -> dict[str, Any]:
+    if not HTTP_CACHE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(HTTP_CACHE_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        LOGGER.warning(f"Could not load persistent HTTP cache: {exc}")
+    return {}
+
+
+def save_http_cache(cache: dict[str, Any]) -> None:
+    try:
+        HTTP_CACHE_PATH.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception as exc:
+        LOGGER.warning(f"Could not save persistent HTTP cache: {exc}")
+
+
+def init_http_cache() -> None:
+    global HTTP_CACHE
+    with HTTP_CACHE_LOCK:
+        HTTP_CACHE = load_http_cache()
+
+
+def update_cache(key: str, body: dict[str, Any]) -> None:
+    with HTTP_CACHE_LOCK:
+        HTTP_CACHE[key] = {"fetched_at": utc_now(), "body": body}
+        save_http_cache(HTTP_CACHE)
+
+
+class HTTPSConnectionPool:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.pools: dict[str, list[Any]] = {}
+
+    def get_connection(self, url: str) -> tuple[Any, str]:
+        parsed = urlparse(url)
+        host = parsed.netloc
+        is_https = parsed.scheme == "https"
+        pool_key = f"{is_https}:{host}"
+
+        with self.lock:
+            pool = self.pools.setdefault(pool_key, [])
+            if pool:
+                return pool.pop(), parsed.path
+
+        if is_https:
+            conn = http.client.HTTPSConnection(host, timeout=60)
+        else:
+            conn = http.client.HTTPConnection(host, timeout=60)
+        return conn, parsed.path
+
+    def return_connection(self, url: str, conn: Any) -> None:
+        parsed = urlparse(url)
+        host = parsed.netloc
+        is_https = parsed.scheme == "https"
+        pool_key = f"{is_https}:{host}"
+        with self.lock:
+            pool = self.pools.setdefault(pool_key, [])
+            if len(pool) < 10:
+                pool.append(conn)
+            else:
+                conn.close()
+
+
+CONNECTION_POOL = HTTPSConnectionPool()
 
 
 class ConfigError(Exception):
@@ -257,8 +361,6 @@ def request_json(
     query: dict[str, str | int] | None = None,
     throttle: bool = True,
 ) -> dict[str, Any]:
-    if query:
-        url = f"{url}?{urlencode(query)}"
     headers = {"Accept": "application/json"}
     data = None
     if form is not None:
@@ -271,13 +373,23 @@ def request_json(
     for attempt in range(1, max(1, attempts) + 1):
         if throttle and "arubanetworks.com" in url:
             throttle_central(config)
-        req = Request(url, data=data, headers=headers, method=method)
+        
+        conn, path = CONNECTION_POOL.get_connection(url)
+        path_with_query = f"{path}?{urlencode(query)}" if query else path
         try:
-            with urlopen(req, timeout=60) as response:
-                body = response.read().decode("utf-8")
-                return json.loads(body) if body else {}
+            LOGGER.debug(f"Calling Central API: {method} {url} (attempt {attempt}/{attempts})")
+            conn.request(method, path_with_query, body=data, headers=headers)
+            resp = conn.getresponse()
+            body_bytes = resp.read()
+            if resp.status >= 400:
+                raise HTTPError(url, resp.status, resp.reason, resp.headers, io.BytesIO(body_bytes))
+            
+            CONNECTION_POOL.return_connection(url, conn)
+            body = body_bytes.decode("utf-8")
+            return json.loads(body) if body else {}
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
+            CONNECTION_POOL.return_connection(url, conn)
             if exc.code == 429 and attempt < attempts:
                 retry_after = exc.headers.get("Retry-After")
                 try:
@@ -287,8 +399,12 @@ def request_json(
                 time.sleep(max(delay, min(2 ** attempt, 10)))
                 continue
             raise CentralError(f"HTTP {exc.code} calling {url}: {body}") from exc
-        except URLError as exc:
-            raise CentralError(f"Network error calling {url}: {exc.reason}") from exc
+        except Exception as exc:
+            conn.close()
+            if attempt < attempts:
+                time.sleep(min(2 ** attempt, 10))
+                continue
+            raise CentralError(f"Network error calling {url}: {str(exc)}") from exc
     raise CentralError(f"Unable to call {url}")
 
 
@@ -695,73 +811,97 @@ def switch_inventory(config: dict[str, Any], workspace: dict[str, Any], tenant: 
     return inventory
 
 
+def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    devices: list[dict[str, Any]] = []
+    state_devices: dict[str, Any] = {}
+    allowed_kinds = configured_device_types(workspace, tenant)
+    switches_by_serial = switch_inventory(config, workspace, tenant) if "switch" in allowed_kinds else {}
+    discovered = get_all_pages(config, workspace, tenant, "/network-monitoring/v1/devices")
+    seen: set[str] = set()
+    for raw in discovered:
+        serial_hint = str(first_value(raw, "serialNumber", "serial", "id") or "")
+        if serial_hint and serial_hint in switches_by_serial:
+            raw = merge_device_inventory(raw, switches_by_serial[serial_hint])
+        device = normalize_device(raw, workspace, tenant)
+        kind = device_kind(device)
+        serial = str(device.get("serial") or "")
+        if not kind or kind not in allowed_kinds or not serial or serial in seen:
+            continue
+        seen.add(serial)
+        prefix = host_prefix(workspace, tenant)
+        host = device_zabbix_host_name(prefix, device)
+        visible_name = device_host_name(prefix, device)
+        key = device_key(workspace, tenant, kind, serial)
+        device.update({"kind": kind, "host": host, "visible_name": visible_name, "key": key, "host_prefix": prefix})
+        devices.append(device)
+        state_devices[key] = {
+            "key": key,
+            "kind": kind,
+            "serial": serial,
+            "site_id": device.get("site_id"),
+            "site_name": device.get("site_name"),
+            "host": host,
+            "visible_name": visible_name,
+            "workspace_id": str(workspace["workspace_id"]),
+            "workspace_name": str(workspace.get("name") or workspace["workspace_id"]),
+            "tenant_id": str(tenant["tenant_id"]),
+            "tenant_name": str(tenant["tenant_name"]),
+            "central_base_url": str(workspace["central_base_url"]),
+        }
+    for serial, raw in switches_by_serial.items():
+        if serial in seen:
+            continue
+        device = normalize_device(raw, workspace, tenant)
+        kind = device_kind(device) or "switch"
+        if kind != "switch":
+            continue
+        prefix = host_prefix(workspace, tenant)
+        host = device_zabbix_host_name(prefix, device)
+        visible_name = device_host_name(prefix, device)
+        key = device_key(workspace, tenant, kind, serial)
+        device.update({"kind": kind, "host": host, "visible_name": visible_name, "key": key, "host_prefix": prefix})
+        devices.append(device)
+        state_devices[key] = {
+            "key": key,
+            "kind": kind,
+            "serial": serial,
+            "site_id": device.get("site_id"),
+            "site_name": device.get("site_name"),
+            "host": host,
+            "visible_name": visible_name,
+            "workspace_id": str(workspace["workspace_id"]),
+            "workspace_name": str(workspace.get("name") or workspace["workspace_id"]),
+            "tenant_id": str(tenant["tenant_id"]),
+            "tenant_name": str(tenant["tenant_name"]),
+            "central_base_url": str(workspace["central_base_url"]),
+        }
+    return devices, state_devices
+
+
 def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     devices: list[dict[str, Any]] = []
     state: dict[str, Any] = {"version": APP_VERSION, "generated_at": iso_now(), "devices": {}}
+    tasks = []
     for workspace in config_list(config, "workspaces"):
-        tenants = workspace_tenants(config, workspace)
-        for tenant in tenants:
-            allowed_kinds = configured_device_types(workspace, tenant)
-            switches_by_serial = switch_inventory(config, workspace, tenant) if "switch" in allowed_kinds else {}
-            discovered = get_all_pages(config, workspace, tenant, "/network-monitoring/v1/devices")
-            seen: set[str] = set()
-            for raw in discovered:
-                serial_hint = str(first_value(raw, "serialNumber", "serial", "id") or "")
-                if serial_hint and serial_hint in switches_by_serial:
-                    raw = merge_device_inventory(raw, switches_by_serial[serial_hint])
-                device = normalize_device(raw, workspace, tenant)
-                kind = device_kind(device)
-                serial = str(device.get("serial") or "")
-                if not kind or kind not in allowed_kinds or not serial or serial in seen:
-                    continue
-                seen.add(serial)
-                prefix = host_prefix(workspace, tenant)
-                host = device_zabbix_host_name(prefix, device)
-                visible_name = device_host_name(prefix, device)
-                key = device_key(workspace, tenant, kind, serial)
-                device.update({"kind": kind, "host": host, "visible_name": visible_name, "key": key, "host_prefix": prefix})
-                devices.append(device)
-                state["devices"][key] = {
-                    "key": key,
-                    "kind": kind,
-                    "serial": serial,
-                    "site_id": device.get("site_id"),
-                    "site_name": device.get("site_name"),
-                    "host": host,
-                    "visible_name": visible_name,
-                    "workspace_id": str(workspace["workspace_id"]),
-                    "workspace_name": str(workspace.get("name") or workspace["workspace_id"]),
-                    "tenant_id": str(tenant["tenant_id"]),
-                    "tenant_name": str(tenant["tenant_name"]),
-                    "central_base_url": str(workspace["central_base_url"]),
-                }
-            for serial, raw in switches_by_serial.items():
-                if serial in seen:
-                    continue
-                device = normalize_device(raw, workspace, tenant)
-                kind = device_kind(device) or "switch"
-                if kind != "switch":
-                    continue
-                prefix = host_prefix(workspace, tenant)
-                host = device_zabbix_host_name(prefix, device)
-                visible_name = device_host_name(prefix, device)
-                key = device_key(workspace, tenant, kind, serial)
-                device.update({"kind": kind, "host": host, "visible_name": visible_name, "key": key, "host_prefix": prefix})
-                devices.append(device)
-                state["devices"][key] = {
-                    "key": key,
-                    "kind": kind,
-                    "serial": serial,
-                    "site_id": device.get("site_id"),
-                    "site_name": device.get("site_name"),
-                    "host": host,
-                    "visible_name": visible_name,
-                    "workspace_id": str(workspace["workspace_id"]),
-                    "workspace_name": str(workspace.get("name") or workspace["workspace_id"]),
-                    "tenant_id": str(tenant["tenant_id"]),
-                    "tenant_name": str(tenant["tenant_name"]),
-                    "central_base_url": str(workspace["central_base_url"]),
-                }
+        try:
+            tenants = workspace_tenants(config, workspace)
+            for tenant in tenants:
+                tasks.append((workspace, tenant))
+        except Exception as exc:
+            LOGGER.error(f"Error fetching tenants for workspace {workspace.get('name') or workspace.get('workspace_id')}: {exc}", exc_info=True)
+
+    max_workers = int(config_section(config, "sync").get("max_discovery_workers") or 4)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(discover_tenant_devices, config, ws, t): (ws, t) for ws, t in tasks}
+        for future in concurrent.futures.as_completed(futures):
+            ws, t = futures[future]
+            try:
+                t_devices, t_state_devices = future.result()
+                devices.extend(t_devices)
+                state["devices"].update(t_state_devices)
+            except Exception as exc:
+                LOGGER.error(f"Error discovering devices for workspace {ws.get('name')} tenant {t.get('tenant_name')}: {exc}", exc_info=True)
+
     return devices, state
 
 
@@ -1925,52 +2065,65 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
     serial = str(device["serial"])
     site_id = str(device["site_id"]) if device.get("site_id") else ""
     query = {"site-id": site_id} if site_id else None
-    details, details_error = central_get_optional(config, workspace, tenant, device_path(kind, serial), query)
-    payload: dict[str, Any] = {"details": details or {}, "errors": {}}
-    if details_error:
-        payload["errors"]["details"] = details_error
 
-    firmware, firmware_error = central_get_optional(
-        config,
-        workspace,
-        tenant,
-        "/network-services/v1alpha1/firmware-details",
-        {"limit": 1000, "filter": firmware_filter(serial)},
-    )
-    payload["firmware"] = firmware or {}
-    if firmware_error:
-        payload["errors"]["firmware"] = firmware_error
+    tasks = {
+        "details": (device_path(kind, serial), query, False),
+        "firmware": ("/network-services/v1alpha1/firmware-details", {"limit": 1000, "filter": firmware_filter(serial)}, False),
+    }
 
     if kind == "ap":
-        for name, path in {
-            "radios": f"/network-monitoring/v1/aps/{quote(serial)}/radios",
-            "ports": f"/network-monitoring/v1/aps/{quote(serial)}/ports",
-            "wlans": f"/network-monitoring/v1/aps/{quote(serial)}/wlans",
-        }.items():
-            value, error = central_get_optional(config, workspace, tenant, path, query)
-            payload[name] = value or {}
-            if error:
-                payload["errors"][name] = error
+        tasks.update({
+            "radios": (f"/network-monitoring/v1/aps/{quote(serial)}/radios", query, False),
+            "ports": (f"/network-monitoring/v1/aps/{quote(serial)}/ports", query, False),
+            "wlans": (f"/network-monitoring/v1/aps/{quote(serial)}/wlans", query, False),
+        })
     elif kind == "switch":
-        interfaces, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1alpha1/switch/{quote(serial)}/interfaces", query)
-        payload["interfaces"] = normalize_interface_records(interfaces)
-        if error:
-            payload["errors"]["interfaces"] = error
-        detail_data = payload["details"] if isinstance(payload.get("details"), dict) else {}
+        tasks.update({
+            "interfaces": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/interfaces", query, True),
+            "hardware_trends": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/hardware-trends", query, False),
+            "lag_summary": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/lag-summary", query, False),
+            "vsx_detail": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/vsx", query, False),
+            "neighbours": (f"/network-monitoring/v1/neighbours/{quote(serial)}", query, False),
+        })
+    elif kind == "gateway":
+        tasks.update({
+            "ports": (f"/network-monitoring/v1/gateways/{quote(serial)}/ports", query, True),
+        })
+
+    payload: dict[str, Any] = {"errors": {}}
+    max_workers = int(config_section(config, "gateway").get("max_payload_workers") or 5)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        def worker(name: str, path: str, q: dict[str, Any] | None, is_pages: bool) -> tuple[str, Any, str | None]:
+            try:
+                if is_pages:
+                    res, err = get_all_pages_optional(config, workspace, tenant, path, q)
+                else:
+                    res, err = central_get_optional(config, workspace, tenant, path, q)
+                return name, res, err
+            except Exception as e:
+                return name, None, str(e)
+
+        futures = [executor.submit(worker, name, path, q, is_pages) for name, (path, q, is_pages) in tasks.items()]
+        for future in concurrent.futures.as_completed(futures):
+            name, res, err = future.result()
+            payload[name] = res or ({} if name not in ("interfaces", "ports") else [])
+            if err:
+                if name in {"lag_summary", "vsx_detail", "stack_members"} and is_not_found_error(err):
+                    continue
+                payload["errors"][name] = err
+
+    if kind == "switch":
+        payload["interfaces"] = normalize_interface_records(payload.get("interfaces") or [])
+        detail_data = payload.get("details") or {}
         stack_id = first_value(detail_data, "stackId", "stack_id")
-        extra_paths = {
-            "hardware_trends": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/hardware-trends",
-            "lag_summary": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/lag-summary",
-            "vsx_detail": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/vsx",
-            "neighbours": f"/network-monitoring/v1/neighbours/{quote(serial)}",
-        }
         if stack_id:
-            extra_paths["stack_members"] = f"/network-monitoring/v1alpha1/stack/{quote(str(stack_id))}/members"
-        for name, path in extra_paths.items():
-            value, endpoint_error = central_get_optional(config, workspace, tenant, path, query)
-            payload[name] = value or {}
-            if endpoint_error and not (name in {"lag_summary", "vsx_detail", "stack_members"} and is_not_found_error(endpoint_error)):
-                payload["errors"][name] = endpoint_error
+            stack_path = f"/network-monitoring/v1alpha1/stack/{quote(str(stack_id))}/members"
+            val, err = central_get_optional(config, workspace, tenant, stack_path, query)
+            payload["stack_members"] = val or {}
+            if err and not is_not_found_error(err):
+                payload["errors"]["stack_members"] = err
+        
         payload["uplinks"] = build_uplink_records(
             device,
             payload["interfaces"],
@@ -1979,11 +2132,6 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
             payload.get("vsx_detail"),
             detail_data,
         )
-    elif kind == "gateway":
-        ports, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1/gateways/{quote(serial)}/ports", query)
-        payload["ports"] = ports
-        if error:
-            payload["errors"]["ports"] = error
     return payload
 
 
@@ -2015,8 +2163,7 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
         }
         if str(device["kind"]) == "switch":
             body["optional"] = optional_switch_discovery(summary)
-        with HTTP_CACHE_LOCK:
-            HTTP_CACHE[cache_key] = {"fetched_at": utc_now(), "body": body}
+        update_cache(cache_key, body)
         return 200, body
     except Exception as exc:
         with HTTP_CACHE_LOCK:
@@ -2054,8 +2201,7 @@ def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tu
     try:
         data = central_get(config, workspace, tenant, f"/network-monitoring/v1alpha1/site-health/{quote(site_id)}")
         body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
-        with HTTP_CACHE_LOCK:
-            HTTP_CACHE[cache_key] = {"fetched_at": utc_now(), "body": body}
+        update_cache(cache_key, body)
         return 200, body
     except Exception as exc:
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
@@ -2150,7 +2296,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt: str, *args: Any) -> None:
         if config_section(self.config, "gateway").get("access_log", False):
-            super().log_message(fmt, *args)
+            LOGGER.info(fmt % args)
 
 
 def run_gateway(config: dict[str, Any]) -> None:
@@ -2159,20 +2305,21 @@ def run_gateway(config: dict[str, Any]) -> None:
     port = int(gateway.get("port") or 6767)
     GatewayHandler.config = config
     server = QuietThreadingHTTPServer((listen, port), GatewayHandler)
-    print(json.dumps({"status": "listening", "listen": listen, "port": port, "version": APP_VERSION}))
+    LOGGER.info(f"Gateway listening on {listen}:{port} (version {APP_VERSION})")
     server.serve_forever()
 
 
 def run_combined(config: dict[str, Any]) -> None:
     sync_interval = int(config_section(config, "sync").get("interval_seconds") or 1800)
+    LOGGER.info(f"Starting gateway thread, and sync loop every {sync_interval} seconds")
     thread = threading.Thread(target=run_gateway, args=(config,), daemon=True)
     thread.start()
     while True:
         try:
             result = sync_zabbix(config, apply=True)
-            print(json.dumps({"sync": result}, ensure_ascii=True))
+            LOGGER.info(f"Sync complete: {json.dumps(result, ensure_ascii=True)}")
         except Exception as exc:
-            print(json.dumps({"sync": {"status": "error", "error": str(exc)}}, ensure_ascii=True), file=sys.stderr)
+            LOGGER.error(f"Sync error: {str(exc)}", exc_info=True)
         time.sleep(sync_interval)
 
 
@@ -2191,6 +2338,8 @@ def main() -> int:
 
     try:
         config = load_json_config()
+        configure_logging(config)
+        init_http_cache()
         if args.command == "config-check":
             print(json.dumps(config_check(config), ensure_ascii=True))
             return 0
