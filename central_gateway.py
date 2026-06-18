@@ -1531,7 +1531,7 @@ def device_path(kind: str, serial: str) -> str:
     if kind == "ap":
         return f"/network-monitoring/v1/aps/{quote(serial)}"
     if kind == "switch":
-        return f"/network-monitoring/v1alpha1/switch/{quote(serial)}"
+        return f"/network-monitoring/v1/switch/{quote(serial)}"
     if kind == "gateway":
         return f"/network-monitoring/v1/gateways/{quote(serial)}"
     raise CentralError(f"Unsupported device kind {kind}")
@@ -1541,7 +1541,7 @@ def list_items(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
-        for key in ("items", "data", "ports", "radios", "interfaces", "wlans", "neighbours", "neighbors", "switchMetrics", "samples"):
+        for key in ("items", "data", "ports", "radios", "interfaces", "wlans", "neighbours", "neighbors", "switchMetrics", "samples", "members"):
             items = value.get(key)
             if isinstance(items, list):
                 return [item for item in items if isinstance(item, dict)]
@@ -2019,6 +2019,7 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "error_count": sum_numeric_fields(ports + interfaces, ("error", "errors")),
         "lag_count": count_payload_records(lag_summary),
         "stack_member_count": count_payload_records(stack_members),
+        "stack_member_offline_count": count_unhealthy(list_items(stack_members)),
         "hardware_component_count": hardware_member_count,
         "fan_count": len(fans),
         "fan_failed_count": count_unhealthy(fans),
@@ -2068,7 +2069,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
 
     tasks = {
         "details": (device_path(kind, serial), query, False),
-        "firmware": ("/network-services/v1alpha1/firmware-details", {"limit": 1000, "filter": firmware_filter(serial)}, False),
+        "firmware": ("/network-services/v1/firmware-details", {"limit": 1000, "filter": firmware_filter(serial)}, False),
     }
 
     if kind == "ap":
@@ -2079,10 +2080,10 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         })
     elif kind == "switch":
         tasks.update({
-            "interfaces": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/interfaces", query, True),
-            "hardware_trends": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/hardware-trends", query, False),
-            "lag_summary": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/lag-summary", query, False),
-            "vsx_detail": (f"/network-monitoring/v1alpha1/switch/{quote(serial)}/vsx", query, False),
+            "interfaces": (f"/network-monitoring/v1/switch/{quote(serial)}/interfaces", query, True),
+            "hardware_trends": (f"/network-monitoring/v1/switch/{quote(serial)}/hardware-trends", query, False),
+            "lag_summary": (f"/network-monitoring/v1/switch/{quote(serial)}/lag-summary", query, False),
+            "vsx_detail": (f"/network-monitoring/v1/switch/{quote(serial)}/vsx", query, False),
             "neighbours": (f"/network-monitoring/v1/neighbours/{quote(serial)}", query, False),
         })
     elif kind == "gateway":
@@ -2118,7 +2119,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         detail_data = payload.get("details") or {}
         stack_id = first_value(detail_data, "stackId", "stack_id")
         if stack_id:
-            stack_path = f"/network-monitoring/v1alpha1/stack/{quote(str(stack_id))}/members"
+            stack_path = f"/network-monitoring/v1/stack/{quote(str(stack_id))}/members"
             val, err = central_get_optional(config, workspace, tenant, stack_path, query)
             payload["stack_members"] = val or {}
             if err and not is_not_found_error(err):
@@ -2199,7 +2200,7 @@ def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tu
             body["gateway"] = dict(body.get("gateway") or {}, cache="hit")
             return 200, body
     try:
-        data = central_get(config, workspace, tenant, f"/network-monitoring/v1alpha1/site-health/{quote(site_id)}")
+        data = central_get(config, workspace, tenant, f"/network-monitoring/v1/site-health/{quote(site_id)}")
         body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
         update_cache(cache_key, body)
         return 200, body

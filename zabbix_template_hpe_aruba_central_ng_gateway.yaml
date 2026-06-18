@@ -1124,6 +1124,22 @@ zabbix_export:
           - $.summary.stack_member_count
         master_item:
           key: central.device.raw
+      - uuid: ad8ccf044bb711eeb82c16c4e2df96eb
+        name: Switch stack member offline count
+        type: DEPENDENT
+        key: 'central.switch.stack_member_offline_count[{#FEATURE_ID}]'
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - $.summary.stack_member_offline_count
+        master_item:
+          key: central.device.raw
+        trigger_prototypes:
+        - uuid: bd9835fa67a54d6f81fe8b4448ca7f85
+          expression: 'last(/HPE Aruba Central NG - DeviceType Switch/central.switch.stack_member_offline_count[{#FEATURE_ID}])>0'
+          name: 'Switch stack {#FEATURE_ID}: one or more members are offline'
+          priority: HIGH
     - uuid: 185b3e69060842238aa430c744f4e36f
       name: Switch fan discovery
       type: DEPENDENT
