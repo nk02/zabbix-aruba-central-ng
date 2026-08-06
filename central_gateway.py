@@ -1994,14 +1994,17 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "onlineStatus",
         "online_status",
     )
-    summary_status = normalize_status(
+    live_status = normalize_status(
         first_value(data, *status_keys)
         or first_value(raw, *status_keys)
         or first_value(first_stats, *status_keys)
-        or device.get("status")
     )
-    if not summary_status and (details_error or not data):
+    if live_status:
+        summary_status = live_status
+    elif details_error:
         summary_status = "OFFLINE"
+    else:
+        summary_status = normalize_status(device.get("status")) or "OFFLINE"
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
