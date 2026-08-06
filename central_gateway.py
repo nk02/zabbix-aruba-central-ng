@@ -1430,7 +1430,7 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     elif details_error:
         summary_status = "OFFLINE"
     else:
-        summary_status = normalize_status(device.get("status")) or "OFFLINE"
+        summary_status = normalize_status(device.get("status")) or "ONLINE"
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
