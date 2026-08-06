@@ -658,9 +658,9 @@ def first_value(data: dict[str, Any], *keys: str) -> Any:
 def normalize_status(value: Any) -> str:
     text = str(value or "").strip()
     lowered = text.lower()
-    if lowered in ("online", "up", "connected", "ok"):
+    if lowered in ("online", "up", "connected", "ok", "active", "normal", "1", "true"):
         return "ONLINE"
-    if lowered in ("offline", "down", "disconnected"):
+    if lowered in ("offline", "down", "disconnected", "unreachable", "error", "failed", "inactive", "0", "false", "degraded", "critical", "major"):
         return "OFFLINE"
     return text.upper() if text else ""
 
@@ -840,6 +840,7 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
             "serial": serial,
             "site_id": device.get("site_id"),
             "site_name": device.get("site_name"),
+            "status": device.get("status"),
             "host": host,
             "visible_name": visible_name,
             "workspace_id": str(workspace["workspace_id"]),
@@ -867,6 +868,7 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
             "serial": serial,
             "site_id": device.get("site_id"),
             "site_name": device.get("site_name"),
+            "status": device.get("status"),
             "host": host,
             "visible_name": visible_name,
             "workspace_id": str(workspace["workspace_id"]),
@@ -1968,17 +1970,38 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     transceivers = hardware_records(hardware_trends, ("transceivers",), ("optics",), ("summary", "transceivers"))
     transceiver_ports = transceiver_interfaces(interfaces)
     error_count = len([name for name in (payload.get("errors") or {}) if name])
+    details_error = bool(payload.get("errors", {}).get("details"))
+    status_keys = (
+        "status",
+        "health",
+        "operStatus",
+        "operationalStatus",
+        "adminStatus",
+        "linkStatus",
+        "state",
+        "presence",
+        "apStatus",
+        "ap_status",
+        "deviceStatus",
+        "device_status",
+        "connectionState",
+        "connection_state",
+        "reachability",
+        "overallStatus",
+        "overall_status",
+        "statusCode",
+        "status_code",
+        "onlineStatus",
+        "online_status",
+    )
     summary_status = normalize_status(
-        first_value(
-            data,
-            "status",
-            "health",
-            "operStatus",
-            "operationalStatus",
-        )
-        or first_value(raw, "status", "health", "operStatus", "operationalStatus")
+        first_value(data, *status_keys)
+        or first_value(raw, *status_keys)
+        or first_value(first_stats, *status_keys)
         or device.get("status")
     )
+    if not summary_status and (details_error or not data):
+        summary_status = "OFFLINE"
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
