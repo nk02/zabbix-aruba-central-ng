@@ -137,6 +137,84 @@ Important settings:
 - `zabbix.template_group`: Zabbix template group used by the bundled templates. It must already exist.
 - `zabbix.gateway_host`: Zabbix host used for gateway health.
 
+## Switch Interface Discovery And LLD Overrides
+
+The switch template includes two different discovery layers:
+
+- `Switch uplink discovery`: enabled by default for interfaces classified as uplinks by the gateway.
+- `Switch interface discovery`: discovers all switch interfaces.
+
+All generic switch interface item prototypes are disabled by default. This keeps the template quiet for large switches while still creating the discovery structure.
+
+To avoid enabling item prototypes one by one, the template ships with LLD override-ready macros and prebuilt overrides:
+
+```text
+{$CENTRAL.SWITCH.INTERFACE.BASIC.MATCHES}
+{$CENTRAL.SWITCH.INTERFACE.ADVANCED.MATCHES}
+```
+
+Both macros default to `a^`, which matches nothing.
+
+The `Switch interface discovery` rule exposes these additional LLD macros:
+
+- `{#IF_ID}`
+- `{#IF_NAME}`
+- `{#IF_CONNECTOR}`
+- `{#IF_UPLINK}`
+- `{#IF_NEIGHBOUR}`
+- `{#IF_TOPOLOGY_TYPE}`
+- `{#IF_TRANSCEIVER_STATUS}`
+
+The bundled overrides work like this:
+
+- `Enable selected switch interfaces - basic items`
+  - enables these interface item prototypes for matching ports:
+    - status
+    - operational status
+    - speed
+    - neighbour
+    - neighbour topology type
+    - neighbour vendor
+
+- `Enable selected switch interfaces - advanced items and triggers`
+  - enables these additional prototypes for matching ports:
+    - CRC error count
+    - packet drop count
+    - error count
+    - transceiver status
+    - transceiver model
+    - connector
+    - admin status
+  - also enables the related trigger prototypes
+
+Examples:
+
+Enable basic monitoring only for one port:
+
+```text
+{$CENTRAL.SWITCH.INTERFACE.BASIC.MATCHES}=^1/1/24$
+```
+
+Enable advanced counters only for one port:
+
+```text
+{$CENTRAL.SWITCH.INTERFACE.ADVANCED.MATCHES}=^1/1/24$
+```
+
+Enable basic monitoring for all SFP ports:
+
+```text
+{$CENTRAL.SWITCH.INTERFACE.BASIC.MATCHES}=^1/1/(25|26|27|28)$
+```
+
+Enable advanced monitoring for a range of uplinks or core-facing ports:
+
+```text
+{$CENTRAL.SWITCH.INTERFACE.ADVANCED.MATCHES}=^1/1/(23|24|25|26)$
+```
+
+After changing one of these macros, wait for the next discovery cycle or force a template/host refresh from Zabbix. Newly matched interfaces will get the enabled item and trigger prototypes automatically.
+
 ## Zabbix API Permissions
 
 Use a dedicated Zabbix user and API token. The user must be allowed to call these API methods:
