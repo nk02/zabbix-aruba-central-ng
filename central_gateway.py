@@ -2007,12 +2007,28 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
             ("details", "status"),
         ])
     )
-    if live_status:
-        summary_status = live_status
-    elif device.get("status"):
-        summary_status = normalize_status(device.get("status"))
-    elif details_error:
+    has_details_data = bool(
+        data
+        and any(
+            data.get(k) not in (None, "")
+            for k in (
+                "serialNumber",
+                "serial",
+                "id",
+                "macAddress",
+                "mac",
+                "ipv4",
+                "deviceName",
+                "name",
+                "hostname",
+                "model",
+            )
+        )
+    )
+    if details_error or not has_details_data or (kind == "ap" and error_count >= 3):
         summary_status = "OFFLINE"
+    elif live_status:
+        summary_status = live_status
     else:
         summary_status = "ONLINE"
     summary = {
