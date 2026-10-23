@@ -1251,7 +1251,7 @@ def device_path(kind: str, serial: str) -> str:
     if kind == "ap":
         return f"/network-monitoring/v1/aps/{quote(serial)}"
     if kind == "switch":
-        return f"/network-monitoring/v1alpha1/switch/{quote(serial)}"
+        return f"/network-monitoring/v1/switch/{quote(serial)}"
     if kind == "gateway":
         return f"/network-monitoring/v1/gateways/{quote(serial)}"
     raise CentralError(f"Unsupported device kind {kind}")
@@ -1493,7 +1493,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         config,
         workspace,
         tenant,
-        "/network-services/v1alpha1/firmware-details",
+        "/network-services/v1/firmware-details",
         {"limit": 1000, "filter": firmware_filter(serial)},
     )
     payload["firmware"] = firmware or {}
@@ -1511,19 +1511,19 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
             if error:
                 payload["errors"][name] = error
     elif kind == "switch":
-        interfaces, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1alpha1/switch/{quote(serial)}/interfaces", query)
+        interfaces, error = get_all_pages_optional(config, workspace, tenant, f"/network-monitoring/v1/switch/{quote(serial)}/interfaces", query)
         payload["interfaces"] = interfaces
         if error:
             payload["errors"]["interfaces"] = error
         detail_data = payload["details"] if isinstance(payload.get("details"), dict) else {}
         stack_id = first_value(detail_data, "stackId", "stack_id")
         extra_paths = {
-            "hardware_trends": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/hardware-trends",
-            "lag_summary": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/lag-summary",
-            "vsx_detail": f"/network-monitoring/v1alpha1/switch/{quote(serial)}/vsx",
+            "hardware_trends": f"/network-monitoring/v1/switch/{quote(serial)}/hardware-trends",
+            "lag_summary": f"/network-monitoring/v1/switch/{quote(serial)}/lag-summary",
+            "vsx_detail": f"/network-monitoring/v1/switch/{quote(serial)}/vsx",
         }
         if stack_id:
-            extra_paths["stack_members"] = f"/network-monitoring/v1alpha1/stack/{quote(str(stack_id))}/members"
+            extra_paths["stack_members"] = f"/network-monitoring/v1/stack/{quote(str(stack_id))}/members"
         for name, path in extra_paths.items():
             value, endpoint_error = central_get_optional(config, workspace, tenant, path, query)
             payload[name] = value or {}
@@ -1598,7 +1598,7 @@ def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tu
             body["gateway"] = dict(body.get("gateway") or {}, cache="hit")
             return 200, body
     try:
-        data = central_get(config, workspace, tenant, f"/network-monitoring/v1alpha1/site-health/{quote(site_id)}")
+        data = central_get(config, workspace, tenant, f"/network-monitoring/v1/site-health/{quote(site_id)}")
         body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
         with HTTP_CACHE_LOCK:
             HTTP_CACHE[cache_key] = {"fetched_at": utc_now(), "body": body}
