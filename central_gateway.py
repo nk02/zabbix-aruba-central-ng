@@ -21,9 +21,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.13"
+APP_VERSION = "2.0.14"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.13"
+TEMPLATE_VERSION = "2.0.14"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -2222,9 +2222,9 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     if live_status:
         summary_status = live_status
     elif details_error:
-        summary_status = normalize_status(device.get("status")) or "OFFLINE"
+        summary_status = "OFFLINE"
     else:
-        summary_status = normalize_status(device.get("status")) or "ONLINE"
+        summary_status = "ONLINE"
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
@@ -2394,15 +2394,12 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
         cached = HTTP_CACHE.get(cache_key)
         if cached and utc_now() - int(cached.get("fetched_at") or 0) < ttl:
             body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, cache="hit")
+            body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="hit")
             return 200, body
     workspace = find_workspace(config, str(device["workspace_id"]))
     tenant = gateway_tenant_record(device)
     try:
         payload = collect_device_payload(config, workspace, tenant, device)
-        details_err = (payload.get("errors") or {}).get("details")
-        if details_err and not is_not_found_error(str(details_err)):
-            raise CentralError(str(details_err))
         summary = normalize_summary(str(device["kind"]), payload, device)
         body = {
             "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
