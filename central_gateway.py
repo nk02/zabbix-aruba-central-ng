@@ -21,9 +21,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.12"
+APP_VERSION = "2.0.13"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.12"
+TEMPLATE_VERSION = "2.0.13"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -44,6 +44,10 @@ HTTP_CACHE_LOCK = threading.Lock()
 HTTP_CACHE: dict[str, dict[str, Any]] = {}
 TOKEN_CACHE_LOCK = threading.Lock()
 GATEWAY_STATE_LOCK = threading.Lock()
+GATEWAY_STATE_MEM_CACHE: dict[str, Any] | None = None
+GATEWAY_STATE_MTIME_NS: int | None = None
+PACKAGE_VERSION_LOCK = threading.Lock()
+PACKAGE_VERSION_CACHE: dict[str, dict[str, Any]] = {}
 
 
 LOGGER = logging.getLogger("aruba_gateway")
@@ -527,6 +531,14 @@ def package_version_status(config: dict[str, Any]) -> dict[str, Any]:
         }
     ref = str(gateway.get("version_check_ref") or "main")
     base = str(gateway.get("version_check_base_url") or GITHUB_RAW_BASE_URL).rstrip("/")
+    ttl = int(gateway.get("version_check_ttl_seconds") or 3600)
+    cache_key = f"{base}:{ref}:{APP_VERSION}:{TEMPLATE_VERSION}"
+    now = utc_now()
+    with PACKAGE_VERSION_LOCK:
+        cached = PACKAGE_VERSION_CACHE.get(cache_key)
+        if isinstance(cached, dict) and now < int(cached.get("expires_at") or 0):
+            return dict(cached["value"])
+
     result: dict[str, Any] = {"status": "current"}
     try:
         latest_app = extract_python_constant(request_text(f"{base}/{ref}/central_gateway.py"), "APP_VERSION")
@@ -543,7 +555,14 @@ def package_version_status(config: dict[str, Any]) -> dict[str, Any]:
         result["status"] = "outdated"
     elif any(component["status"] == "unknown" for component in components):
         result["status"] = "unknown"
-    return result
+
+    effective_ttl = min(max(60, ttl), 300) if result["status"] == "unknown" else max(60, ttl)
+    with PACKAGE_VERSION_LOCK:
+        PACKAGE_VERSION_CACHE[cache_key] = {
+            "expires_at": utc_now() + effective_ttl,
+            "value": result,
+        }
+    return dict(result)
 
 
 def workspace_token(config: dict[str, Any], workspace: dict[str, Any], force_refresh: bool = False) -> str:
@@ -767,6 +786,7 @@ def normalize_device(raw: dict[str, Any], workspace: dict[str, Any], tenant: dic
         "site_name": first_value(raw, "siteName", "site"),
         "status": normalize_status(first_value(raw, "status", "health")),
         "firmware": first_value(raw, "firmwareVersion", "softwareVersion"),
+        "uplink_ports": first_value(raw, "uplink_ports", "uplinkPorts", "uplinks", "uplinkInterfaces", "uplink_interfaces"),
         "device_type": device_type,
         "raw": raw,
     }
@@ -869,7 +889,7 @@ def device_key(workspace: dict[str, Any], tenant: dict[str, Any], kind: str, ser
 
 
 def switch_inventory(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    records = get_all_pages(
+    records, err = get_all_pages_optional(
         config,
         workspace,
         tenant,
@@ -880,6 +900,10 @@ def switch_inventory(config: dict[str, Any], workspace: dict[str, Any], tenant: 
             "calculate_client_count": "true",
         },
     )
+    if err:
+        LOGGER.warning(
+            f"Optional switch inventory fetch failed for workspace {workspace.get('name')} tenant {tenant.get('tenant_name')}: {err}"
+        )
     inventory: dict[str, dict[str, Any]] = {}
     for record in records:
         serial = str(first_value(record, "serialNumber", "serial", "id") or "")
@@ -911,7 +935,7 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
         key = device_key(workspace, tenant, kind, serial)
         device.update({"kind": kind, "host": host, "visible_name": visible_name, "key": key, "host_prefix": prefix})
         devices.append(device)
-        state_devices[key] = {
+        state_entry: dict[str, Any] = {
             "key": key,
             "kind": kind,
             "serial": serial,
@@ -926,6 +950,9 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
             "tenant_name": str(tenant["tenant_name"]),
             "central_base_url": str(workspace["central_base_url"]),
         }
+        if device.get("uplink_ports") not in (None, "", []):
+            state_entry["uplink_ports"] = device.get("uplink_ports")
+        state_devices[key] = state_entry
     for serial, raw in switches_by_serial.items():
         if serial in seen:
             continue
@@ -939,7 +966,7 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
         key = device_key(workspace, tenant, kind, serial)
         device.update({"kind": kind, "host": host, "visible_name": visible_name, "key": key, "host_prefix": prefix})
         devices.append(device)
-        state_devices[key] = {
+        state_entry = {
             "key": key,
             "kind": kind,
             "serial": serial,
@@ -954,6 +981,9 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
             "tenant_name": str(tenant["tenant_name"]),
             "central_base_url": str(workspace["central_base_url"]),
         }
+        if device.get("uplink_ports") not in (None, "", []):
+            state_entry["uplink_ports"] = device.get("uplink_ports")
+        state_devices[key] = state_entry
     return devices, state_devices
 
 
@@ -1008,19 +1038,37 @@ def discover_devices(config: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
 
 
 def save_gateway_state(state: dict[str, Any]) -> None:
+    global GATEWAY_STATE_MEM_CACHE, GATEWAY_STATE_MTIME_NS
     with GATEWAY_STATE_LOCK:
         write_json_atomic(GATEWAY_STATE_PATH, state)
+        GATEWAY_STATE_MEM_CACHE = state
+        try:
+            GATEWAY_STATE_MTIME_NS = GATEWAY_STATE_PATH.stat().st_mtime_ns
+        except OSError:
+            GATEWAY_STATE_MTIME_NS = None
 
 
 def load_gateway_state() -> dict[str, Any]:
+    global GATEWAY_STATE_MEM_CACHE, GATEWAY_STATE_MTIME_NS
     with GATEWAY_STATE_LOCK:
         if not GATEWAY_STATE_PATH.exists():
+            GATEWAY_STATE_MEM_CACHE = None
+            GATEWAY_STATE_MTIME_NS = None
             return {"devices": {}}
         try:
+            mtime_ns = GATEWAY_STATE_PATH.stat().st_mtime_ns
+            if GATEWAY_STATE_MEM_CACHE is not None and GATEWAY_STATE_MTIME_NS == mtime_ns:
+                return GATEWAY_STATE_MEM_CACHE
             data = json.loads(GATEWAY_STATE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                GATEWAY_STATE_MEM_CACHE = data
+                GATEWAY_STATE_MTIME_NS = mtime_ns
+                return data
         except Exception:
+            if GATEWAY_STATE_MEM_CACHE is not None:
+                return GATEWAY_STATE_MEM_CACHE
             return {"devices": {}}
-    return data if isinstance(data, dict) else {"devices": {}}
+    return {"devices": {}}
 
 
 def zabbix_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -1898,7 +1946,7 @@ def interface_transceiver_summary(interfaces: list[dict[str, Any]]) -> dict[str,
 
 def extract_uplink_ids(device: dict[str, Any], details: dict[str, Any], lag_summary: Any, vsx_detail: Any) -> set[str]:
     candidates: set[str] = set()
-    for source in (device.get("raw"), details, lag_summary, vsx_detail):
+    for source in (device, device.get("raw"), details, lag_summary, vsx_detail):
         if not isinstance(source, dict):
             continue
         for key in ("uplink_ports", "uplinkPorts", "uplinks", "uplinkInterfaces", "uplink_interfaces"):
@@ -2174,9 +2222,9 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     if live_status:
         summary_status = live_status
     elif details_error:
-        summary_status = "OFFLINE"
+        summary_status = normalize_status(device.get("status")) or "OFFLINE"
     else:
-        summary_status = "ONLINE"
+        summary_status = normalize_status(device.get("status")) or "ONLINE"
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
@@ -2352,6 +2400,9 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
     tenant = gateway_tenant_record(device)
     try:
         payload = collect_device_payload(config, workspace, tenant, device)
+        details_err = (payload.get("errors") or {}).get("details")
+        if details_err and not is_not_found_error(str(details_err)):
+            raise CentralError(str(details_err))
         summary = normalize_summary(str(device["kind"]), payload, device)
         body = {
             "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
@@ -2417,14 +2468,31 @@ def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str,
     if not context:
         return 404, {"gateway": {"status": "not_found"}, "error": f"Site {site_id} not found in gateway state"}
     workspace, tenant = context
-    end_ms = int(time.time() * 1000)
-    start_ms = end_ms - int(query_params.get("window-ms", ["3600000"])[0])
+    window_ms = int(query_params.get("window-ms", ["3600000"])[0])
     field = query_params.get("field", ["topreasons"])[0]
+    ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 300)
+    cache_key = f"client-onboarding:{tenant['tenant_id']}:{site_id}:{field}:{window_ms}"
+    with HTTP_CACHE_LOCK:
+        cached = HTTP_CACHE.get(cache_key)
+        if cached and utc_now() - int(cached.get("fetched_at") or 0) < ttl:
+            body = dict(cached["body"])
+            body["gateway"] = dict(body.get("gateway") or {}, cache="hit")
+            return 200, body
+    end_ms = int(time.time() * 1000)
+    start_ms = end_ms - window_ms
     params = {"site-id": site_id, "start-at": start_ms, "end-at": end_ms, "field": field}
     try:
         data = central_get(config, workspace, tenant, "/network-monitoring/v1/client-onboarding-stage/count", params)
-        return 200, {"gateway": {"status": "ok", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
+        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
+        update_cache(cache_key, body)
+        return 200, body
     except Exception as exc:
+        with HTTP_CACHE_LOCK:
+            cached = HTTP_CACHE.get(cache_key)
+        if cached:
+            body = dict(cached["body"])
+            body["gateway"] = dict(body.get("gateway") or {}, status="stale", cache="stale", error=str(exc))
+            return 200, body
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
 
 
