@@ -21,9 +21,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.14"
+APP_VERSION = "2.0.15"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.14"
+TEMPLATE_VERSION = "2.0.15"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -138,61 +138,6 @@ def update_cache(key: str, body: dict[str, Any]) -> None:
         for k in stale_keys:
             HTTP_CACHE.pop(k, None)
         save_http_cache(HTTP_CACHE)
-
-
-class HTTPSConnectionPool:
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        self.pools: dict[str, list[Any]] = {}
-
-    def _create_connection(self, host: str, is_https: bool) -> Any:
-        if is_https:
-            return http.client.HTTPSConnection(host, timeout=60)
-        return http.client.HTTPConnection(host, timeout=60)
-
-    def get_connection(self, url: str, allow_reused: bool = True) -> tuple[Any, str, bool]:
-        parsed = urlparse(url)
-        host = parsed.netloc
-        is_https = parsed.scheme == "https"
-        pool_key = f"{is_https}:{host}"
-        path = parsed.path or "/"
-        if parsed.query:
-            path = f"{path}?{parsed.query}"
-
-        if allow_reused:
-            with self.lock:
-                pool = self.pools.setdefault(pool_key, [])
-                while pool:
-                    conn = pool.pop()
-                    if getattr(conn, "sock", None) is not None:
-                        return conn, path, True
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-
-        return self._create_connection(host, is_https), path, False
-
-    def return_connection(self, url: str, conn: Any) -> None:
-        if getattr(conn, "sock", None) is None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            return
-        parsed = urlparse(url)
-        host = parsed.netloc
-        is_https = parsed.scheme == "https"
-        pool_key = f"{is_https}:{host}"
-        with self.lock:
-            pool = self.pools.setdefault(pool_key, [])
-            if len(pool) < 10:
-                pool.append(conn)
-            else:
-                conn.close()
-
-
-CONNECTION_POOL = HTTPSConnectionPool()
 
 
 class ConfigError(Exception):
@@ -417,7 +362,14 @@ def request_json(
     query: dict[str, str | int] | None = None,
     throttle: bool = True,
 ) -> dict[str, Any]:
-    headers = {"Accept": "application/json"}
+    full_url = url
+    if query:
+        sep = "&" if "?" in full_url else "?"
+        full_url = f"{full_url}{sep}{urlencode(query)}"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": f"aruba-central-gateway/{APP_VERSION}",
+    }
     data = None
     if form is not None:
         data = urlencode(form).encode("utf-8")
@@ -427,47 +379,16 @@ def request_json(
 
     attempts = int(config_section(config, "gateway").get("api_retry_attempts") or 3)
     for attempt in range(1, max(1, attempts) + 1):
-        if throttle and "arubanetworks.com" in url:
+        if throttle and "arubanetworks.com" in full_url:
             throttle_central(config)
-
-        conn, path, reused = CONNECTION_POOL.get_connection(url, allow_reused=True)
-        sep = "&" if "?" in path else "?"
-        path_with_query = f"{path}{sep}{urlencode(query)}" if query else path
+        req = Request(full_url, data=data, headers=headers, method=method)
         try:
-            LOGGER.debug(f"Calling Central API: {method} {url} (attempt {attempt}/{attempts})")
-            try:
-                conn.request(method, path_with_query, body=data, headers=headers)
-                resp = conn.getresponse()
-            except (http.client.HTTPException, OSError):
-                if not reused:
-                    raise
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-                conn, path, reused = CONNECTION_POOL.get_connection(url, allow_reused=False)
-                sep = "&" if "?" in path else "?"
-                path_with_query = f"{path}{sep}{urlencode(query)}" if query else path
-                conn.request(method, path_with_query, body=data, headers=headers)
-                resp = conn.getresponse()
-
-            body_bytes = resp.read()
-            will_close = bool(getattr(resp, "will_close", False))
-            if resp.status >= 400:
-                raise HTTPError(url, resp.status, resp.reason, resp.headers, io.BytesIO(body_bytes))
-
-            if will_close:
-                conn.close()
-            else:
-                CONNECTION_POOL.return_connection(url, conn)
-            body = body_bytes.decode("utf-8")
-            return json.loads(body) if body else {}
+            LOGGER.debug(f"Calling Central API: {method} {full_url} (attempt {attempt}/{attempts})")
+            with urlopen(req, timeout=60) as response:
+                body = response.read().decode("utf-8")
+                return json.loads(body) if body else {}
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
-            if getattr(conn, "sock", None) is not None:
-                CONNECTION_POOL.return_connection(url, conn)
-            else:
-                conn.close()
             if exc.code == 429 and attempt < attempts:
                 retry_after = exc.headers.get("Retry-After")
                 try:
@@ -476,17 +397,13 @@ def request_json(
                     delay = 0.0
                 time.sleep(max(delay, min(2 ** attempt, 10)))
                 continue
-            raise CentralError(f"HTTP {exc.code} calling {url}: {body}") from exc
+            raise CentralError(f"HTTP {exc.code} calling {full_url}: {body}") from exc
         except Exception as exc:
-            try:
-                conn.close()
-            except Exception:
-                pass
             if attempt < attempts:
                 time.sleep(min(2 ** attempt, 10))
                 continue
-            raise CentralError(f"Network error calling {url}: {str(exc)}") from exc
-    raise CentralError(f"Unable to call {url}")
+            raise CentralError(f"Network error calling {full_url}: {str(exc)}") from exc
+    raise CentralError(f"Unable to call {full_url}")
 
 
 def request_text(url: str, timeout: int = 5) -> str:
@@ -641,6 +558,23 @@ def central_get(
         return request_json("GET", base_url + path, config, token=token, query=query)
 
 
+def alternate_paths(path: str) -> list[str]:
+    alts: list[str] = []
+    if "/network-monitoring/v1/switches/" in path:
+        alts.append(path.replace("/network-monitoring/v1/switches/", "/network-monitoring/v1/switch/"))
+    elif "/network-monitoring/v1/switch/" in path:
+        alts.append(path.replace("/network-monitoring/v1/switch/", "/network-monitoring/v1/switches/"))
+    if "/lag-summary" in path:
+        alts.append(path.replace("/lag-summary", "/lag"))
+    elif "/lag" in path and "/lag-summary" not in path:
+        alts.append(path.replace("/lag", "/lag-summary"))
+    if "/network-monitoring/v1/stack/" in path:
+        alts.append(path.replace("/network-monitoring/v1/stack/", "/network-monitoring/v1/stacks/"))
+    elif "/network-monitoring/v1/stacks/" in path:
+        alts.append(path.replace("/network-monitoring/v1/stacks/", "/network-monitoring/v1/stack/"))
+    return alts
+
+
 def central_get_optional(
     config: dict[str, Any],
     workspace: dict[str, Any],
@@ -651,6 +585,12 @@ def central_get_optional(
     try:
         return central_get(config, workspace, tenant, path, query), None
     except CentralError as exc:
+        if is_not_found_error(str(exc)):
+            for alt in alternate_paths(path):
+                try:
+                    return central_get(config, workspace, tenant, alt, query), None
+                except CentralError:
+                    continue
         return None, str(exc)
 
 
@@ -691,6 +631,12 @@ def get_all_pages_optional(
     try:
         return get_all_pages(config, workspace, tenant, path, query), None
     except CentralError as exc:
+        if is_not_found_error(str(exc)):
+            for alt in alternate_paths(path):
+                try:
+                    return get_all_pages(config, workspace, tenant, alt, query), None
+                except CentralError:
+                    continue
         return [], str(exc)
 
 
@@ -1727,7 +1673,7 @@ def device_path(kind: str, serial: str) -> str:
     if kind == "ap":
         return f"/network-monitoring/v1/aps/{quote(serial)}"
     if kind == "switch":
-        return f"/network-monitoring/v1/switch/{quote(serial)}"
+        return f"/network-monitoring/v1/switches/{quote(serial)}"
     if kind == "gateway":
         return f"/network-monitoring/v1/gateways/{quote(serial)}"
     raise CentralError(f"Unsupported device kind {kind}")
@@ -2221,6 +2167,8 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     )
     if live_status:
         summary_status = live_status
+    elif device.get("status"):
+        summary_status = normalize_status(device.get("status"))
     elif details_error:
         summary_status = "OFFLINE"
     else:
@@ -2326,10 +2274,10 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         })
     elif kind == "switch":
         tasks.update({
-            "interfaces": (f"/network-monitoring/v1/switch/{quote(serial)}/interfaces", query, True),
-            "hardware_trends": (f"/network-monitoring/v1/switch/{quote(serial)}/hardware-trends", query, False),
-            "lag_summary": (f"/network-monitoring/v1/switch/{quote(serial)}/lag-summary", query, False),
-            "vsx_detail": (f"/network-monitoring/v1/switch/{quote(serial)}/vsx", query, False),
+            "interfaces": (f"/network-monitoring/v1/switches/{quote(serial)}/interfaces", query, True),
+            "hardware_trends": (f"/network-monitoring/v1/switches/{quote(serial)}/hardware-trends", query, False),
+            "lag_summary": (f"/network-monitoring/v1/switches/{quote(serial)}/lag-summary", query, False),
+            "vsx_detail": (f"/network-monitoring/v1/switches/{quote(serial)}/vsx", query, False),
             "neighbours": (f"/network-monitoring/v1/neighbours/{quote(serial)}", query, False),
         })
     elif kind == "gateway":
@@ -2417,7 +2365,7 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
             cached = HTTP_CACHE.get(cache_key)
         if cached:
             body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, status="stale", cache="stale", error=str(exc))
+            body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
             return 200, body
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
 
@@ -2455,7 +2403,7 @@ def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tu
             cached = HTTP_CACHE.get(cache_key)
         if cached:
             body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, status="stale", cache="stale", error=str(exc))
+            body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
             return 200, body
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
 
@@ -2488,7 +2436,7 @@ def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str,
             cached = HTTP_CACHE.get(cache_key)
         if cached:
             body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, status="stale", cache="stale", error=str(exc))
+            body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
             return 200, body
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
 
