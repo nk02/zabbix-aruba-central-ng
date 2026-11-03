@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.19"
+APP_VERSION = "2.0.20"
 CONFIG_SCHEMA_VERSION = "2.0.0"
 TEMPLATE_VERSION = "2.0.16"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
@@ -60,6 +60,22 @@ GATEWAY_STATE_LAST_STAT = 0.0
 PACKAGE_VERSION_LOCK = threading.Lock()
 PACKAGE_VERSION_CACHE: dict[str, dict[str, Any]] = {}
 LAST_IMPORTED_TEMPLATE_HASH: str | None = None
+FIRMWARE_CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
+FIRMWARE_CACHE_LOCK = threading.Lock()
+
+
+def get_cached_firmware(serial: str) -> dict[str, Any] | None:
+    now = utc_now()
+    with FIRMWARE_CACHE_LOCK:
+        item = FIRMWARE_CACHE.get(serial)
+        if item and now - item[0] < 3600:
+            return item[1]
+    return None
+
+
+def set_cached_firmware(serial: str, data: dict[str, Any]) -> None:
+    with FIRMWARE_CACHE_LOCK:
+        FIRMWARE_CACHE[serial] = (utc_now(), data)
 
 
 def get_payload_executor(max_workers: int = 8) -> concurrent.futures.ThreadPoolExecutor:
@@ -160,6 +176,12 @@ def init_http_cache() -> None:
     global HTTP_CACHE
     with HTTP_CACHE_LOCK:
         HTTP_CACHE = load_http_cache()
+        for v in HTTP_CACHE.values():
+            if isinstance(v, dict) and "body" in v and "bytes" not in v:
+                try:
+                    v["bytes"] = json.dumps(v["body"], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+                except Exception:
+                    pass
 
 
 def flush_http_cache() -> None:
@@ -176,7 +198,11 @@ def flush_http_cache() -> None:
         ]
         for k in stale_keys:
             HTTP_CACHE.pop(k, None)
-        snapshot = dict(HTTP_CACHE)
+        snapshot = {
+            k: {"fetched_at": v.get("fetched_at"), "body": v.get("body")}
+            for k, v in HTTP_CACHE.items()
+            if isinstance(v, dict) and "body" in v
+        }
     save_http_cache(snapshot)
 
 
@@ -192,9 +218,16 @@ atexit.register(flush_http_cache_on_exit)
 def update_cache(key: str, body: dict[str, Any]) -> None:
     global HTTP_CACHE_DIRTY, HTTP_CACHE_LAST_SAVED
     should_flush = False
+    try:
+        raw_bytes = json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    except Exception:
+        raw_bytes = None
     with HTTP_CACHE_LOCK:
         now = utc_now()
-        HTTP_CACHE[key] = {"fetched_at": now, "body": body}
+        entry: dict[str, Any] = {"fetched_at": now, "body": body}
+        if raw_bytes is not None:
+            entry["bytes"] = raw_bytes
+        HTTP_CACHE[key] = entry
         HTTP_CACHE_DIRTY = True
         # Debounce disk persistence: save at most once every 60s
         if time.monotonic() - HTTP_CACHE_LAST_SAVED >= HTTP_CACHE_SAVE_INTERVAL_SECONDS:
@@ -2396,10 +2429,12 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
     kind = str(device["kind"])
     serial = str(device["serial"])
 
+    cached_fw = get_cached_firmware(serial)
     tasks = {
         "details": (device_path(kind, serial), None, False),
-        "firmware": ("/network-services/v1/firmware-details", {"limit": 1000, "filter": firmware_filter(serial)}, False),
     }
+    if cached_fw is None:
+        tasks["firmware"] = ("/network-services/v1/firmware-details", {"limit": 1000, "filter": firmware_filter(serial)}, False)
 
     if kind == "ap":
         tasks.update({
@@ -2442,6 +2477,11 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
             if name in {"lag_summary", "vsx_detail", "stack_members", "hardware_trends", "neighbours"} and is_not_found_error(err):
                 continue
             payload["errors"][name] = err
+
+    if "firmware" in payload and payload["firmware"]:
+        set_cached_firmware(serial, payload["firmware"])
+    elif cached_fw is not None:
+        payload["firmware"] = cached_fw
 
     if kind == "switch":
         payload["interfaces"] = normalize_interface_records(payload.get("interfaces") or [])
@@ -2526,11 +2566,17 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
             age = utc_now() - int(cached.get("fetched_at") or 0)
             soft_window = max(30, int(ttl * 0.25))
             if age < (ttl - soft_window):
+                raw_bytes = cached.get("bytes")
+                if raw_bytes is not None:
+                    return 200, raw_bytes
                 body = dict(cached["body"])
                 body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="hit", age=age)
                 return 200, body
             if age < (ttl * 2):
                 trigger_background_device_fetch(config, key, device)
+                raw_bytes = cached.get("bytes")
+                if raw_bytes is not None:
+                    return 200, raw_bytes
                 body = dict(cached["body"])
                 cache_label = "hit" if age < ttl else "hit_stale"
                 body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache=cache_label, age=age)
@@ -2629,11 +2675,17 @@ def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tu
             age = utc_now() - int(cached.get("fetched_at") or 0)
             soft_window = max(30, int(ttl * 0.25))
             if age < (ttl - soft_window):
+                raw_bytes = cached.get("bytes")
+                if raw_bytes is not None:
+                    return 200, raw_bytes
                 body = dict(cached["body"])
                 body["gateway"] = dict(body.get("gateway") or {}, cache="hit", age=age)
                 return 200, body
             if age < (ttl * 2):
                 trigger_background_site_health_fetch(config, workspace, tenant, site_id, cache_key)
+                raw_bytes = cached.get("bytes")
+                if raw_bytes is not None:
+                    return 200, raw_bytes
                 body = dict(cached["body"])
                 cache_label = "hit" if age < ttl else "hit_stale"
                 body["gateway"] = dict(body.get("gateway") or {}, cache=cache_label, age=age)
@@ -2771,8 +2823,13 @@ class QuietThreadPoolHTTPServer(HTTPServer):
 class GatewayHandler(BaseHTTPRequestHandler):
     config: dict[str, Any] = {}
 
-    def write_json(self, status: int, body: dict[str, Any]) -> None:
-        payload = json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    def write_json(self, status: int, body: Any) -> None:
+        if isinstance(body, bytes):
+            payload = body
+        elif isinstance(body, str):
+            payload = body.encode("utf-8")
+        else:
+            payload = json.dumps(body, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
         try:
             self.send_response(status)
             self.send_header("Content-Type", "application/json")

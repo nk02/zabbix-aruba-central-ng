@@ -6,8 +6,8 @@
     "base_url": "http://ip-or-fqdn-gatewayserver:6767",
     "api_rate_limit_per_second": 8,
     "api_retry_attempts": 3,
-    "device_cache_ttl_seconds": 240,
-    "site_cache_ttl_seconds": 300,
+    "device_cache_ttl_seconds": 600,
+    "site_cache_ttl_seconds": 600,
     "version_check_enabled": true,
     "version_check_ref": "main",
     "access_log": false
