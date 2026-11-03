@@ -434,6 +434,61 @@ zabbix_export:
         - $.summary.firmware_classification
       master_item:
         key: central.device.raw
+    - uuid: f0054556da64419b8c43f91c6d07f75b
+      name: AP IP address
+      type: DEPENDENT
+      key: central.device.ip
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.ip
+      master_item:
+        key: central.device.raw
+    - uuid: dff85082c0e14e9691fc62498263eaba
+      name: AP public IP
+      type: DEPENDENT
+      key: central.device.public_ip
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.public_ip
+      master_item:
+        key: central.device.raw
+    - uuid: b34d29e3d58e43c882f6967399d8aae0
+      name: AP last reboot reason
+      type: DEPENDENT
+      key: central.device.last_reboot_reason
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.last_reboot_reason
+      master_item:
+        key: central.device.raw
+    - uuid: b550cf82e78e4060a867692e94293f7f
+      name: AP negotiated power
+      type: DEPENDENT
+      key: central.ap.negotiated_power
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.negotiated_power
+      master_item:
+        key: central.device.raw
+    - uuid: ceb5481bc4894a87938279707973fa69
+      name: AP default gateway
+      type: DEPENDENT
+      key: central.ap.default_gateway
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.default_gateway
+      master_item:
+        key: central.device.raw
     - uuid: f2700b5b6c424d1dabcb2cb66be17dd6
       name: AP endpoint error count
       type: DEPENDENT
@@ -738,6 +793,93 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.firmware_classification
+      master_item:
+        key: central.device.raw
+    - uuid: c8232c15142c4bd586e83e7cb7aae838
+      name: Switch IP address
+      type: DEPENDENT
+      key: central.device.ip
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.ip
+      master_item:
+        key: central.device.raw
+    - uuid: 30a4ec3537f9431fa4f980ab93854b4e
+      name: Switch public IP
+      type: DEPENDENT
+      key: central.device.public_ip
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.public_ip
+      master_item:
+        key: central.device.raw
+    - uuid: 704494e4356b4e44b0b69c7eef6cf81c
+      name: Switch last reboot reason
+      type: DEPENDENT
+      key: central.device.last_reboot_reason
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.last_reboot_reason
+      master_item:
+        key: central.device.raw
+    - uuid: 366d0904e7c941ee8ee43b471a833e3d
+      name: Switch system temperature
+      type: DEPENDENT
+      key: central.switch.temperature
+      value_type: FLOAT
+      units: °C
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.temperature
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: a5409f6fa61b4329be5e0ac4d0e1498c
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.temperature)>65 and last(/HPE Aruba Central NG - DeviceType Switch/central.device.status)="ONLINE"
+        name: 'Switch {HOST.NAME}: high system temperature (> 65 °C)'
+        priority: WARNING
+        status: DISABLED
+    - uuid: d009c5a4be0b44eb89845cccc94bf343
+      name: Switch PoE power consumption
+      type: DEPENDENT
+      key: central.switch.poe_consumption
+      value_type: FLOAT
+      units: W
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.poe_consumption
+      master_item:
+        key: central.device.raw
+    - uuid: 285fb8086cef4303b41cd81b2cf22b51
+      name: Switch PoE power available
+      type: DEPENDENT
+      key: central.switch.poe_available
+      value_type: FLOAT
+      units: W
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.poe_available
+      master_item:
+        key: central.device.raw
+    - uuid: d0bd7a9e58334c389145d73a6c10b5bf
+      name: Switch total power consumption
+      type: DEPENDENT
+      key: central.switch.power_consumption
+      value_type: FLOAT
+      units: W
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.power_consumption
       master_item:
         key: central.device.raw
     - uuid: 8d6d76c6b7c0432d9534d97a6620ed2c
@@ -1748,6 +1890,28 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.firmware_classification
+      master_item:
+        key: central.device.raw
+    - uuid: 77657a5832844b8ba4c27f63e9e583b5
+      name: Gateway device IP address
+      type: DEPENDENT
+      key: central.device.ip
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.ip
+      master_item:
+        key: central.device.raw
+    - uuid: 3108029876d04f54a7d339f7c1d16f77
+      name: Gateway device public IP
+      type: DEPENDENT
+      key: central.device.public_ip
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.public_ip
       master_item:
         key: central.device.raw
     - uuid: 3aa4827f6cf54e64b6d561c7835f610e

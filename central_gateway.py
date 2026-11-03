@@ -22,9 +22,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.20"
+APP_VERSION = "2.0.21"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.16"
+TEMPLATE_VERSION = "2.0.17"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -2148,9 +2148,9 @@ def build_uplink_records(device: dict[str, Any], interfaces: list[dict[str, Any]
             "admin_state": str(first_value(interface, "adminStatus", "admin_state") or ""),
             "oper_state": str(first_value(interface, "operStatus", "linkStatus", "status") or ""),
             "speed_mbps": speed_value,
-            "crc_error_count": pick_numeric(interface, ("crc",)),
-            "drop_count": pick_numeric(interface, ("drop", "dropped")),
-            "error_count": pick_numeric(interface, ("error", "errors")),
+            "crc_error_count": pick_numeric(interface, ("crc",)) or 0,
+            "drop_count": pick_numeric(interface, ("drop", "dropped")) or 0,
+            "error_count": pick_numeric(interface, ("error", "errors")) or 0,
             "neighbor_count": len(local_neighbours),
             "neighbor_name": str(first_value(local_neighbours[0], "neighborName", "deviceName", "hostname", "name") or "") if local_neighbours else "",
             "neighbor_type": str(first_value(local_neighbours[0], "deviceType", "neighborDeviceType", "type", "platform") or "") if local_neighbours else "",
@@ -2343,13 +2343,57 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         summary_status = "OFFLINE"
     else:
         summary_status = "ONLINE"
+    private_ip = first_value(data, "ipv4", "ipAddress", "ip_address") or device.get("ipv4")
+    public_ip = first_value(data, "publicIp", "publicIpv4", "public_ip")
+    last_reboot_reason = first_value(data, "lastRestartReason", "lastRebootReason", "restartReason")
+    negotiated_power = first_value(data, "negotiatedPower", "negotiated_power")
+    default_gateway = first_value(data, "defaultGateway", "default_gateway")
+
+    temperature = None
+    if first_switch_trend.get("systemTemperature") is not None:
+        try:
+            temperature = round(float(first_switch_trend["systemTemperature"]), 1)
+        except (ValueError, TypeError):
+            pass
+
+    poe_consumption = None
+    if first_switch_trend.get("poeConsumption") is not None:
+        try:
+            poe_consumption = round(float(first_switch_trend["poeConsumption"]), 1)
+        except (ValueError, TypeError):
+            pass
+
+    poe_available = None
+    if first_switch_trend.get("poeAvailable") is not None:
+        try:
+            poe_available = round(float(first_switch_trend["poeAvailable"]), 1)
+        except (ValueError, TypeError):
+            pass
+
+    power_consumption = None
+    raw_pwr = first_switch_trend.get("totalPowerConsumption") if first_switch_trend.get("totalPowerConsumption") is not None else first_switch_trend.get("powerConsumption")
+    if raw_pwr is not None:
+        try:
+            power_consumption = round(float(raw_pwr), 1)
+        except (ValueError, TypeError):
+            pass
+
     summary = {
         "kind": kind,
         "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
         "name": first_value(data, "deviceName", "name", "hostname") or device.get("host"),
         "model": first_value(data, "model", "partNumber"),
         "mac": first_value(data, "macAddress", "mac"),
-        "ipv4": data.get("ipv4"),
+        "ip": private_ip,
+        "ipv4": private_ip,
+        "public_ip": public_ip,
+        "last_reboot_reason": last_reboot_reason,
+        "negotiated_power": negotiated_power,
+        "default_gateway": default_gateway,
+        "temperature": temperature,
+        "poe_consumption": poe_consumption,
+        "poe_available": poe_available,
+        "power_consumption": power_consumption,
         "site_id": first_value(data, "siteId", "site_id") or device.get("site_id"),
         "site_name": first_value(data, "siteName", "site") or device.get("site_name"),
         "status": summary_status,
