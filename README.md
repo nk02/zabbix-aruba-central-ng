@@ -16,7 +16,17 @@ Zabbix performs the actual monitoring through HTTP agent master items and depend
 
 HPE documents a Central rate limit of 10 API calls per second across the Central account. This limit is shared by all tokens and client credentials in that account.
 
-The gateway keeps all Aruba API calls behind one rate limiter. The default is `8` API calls per second to leave a small safety margin.
+The gateway keeps all Aruba API calls behind one rate limiter and provides production-grade scaling:
+
+- **Smooth Rate Limiting**: requests are smoothly paced (125 ms apart for default `8` calls/s) to avoid bursts that could trigger 429 errors.
+- **Bounded Concurrency**: uses a fixed thread-pool HTTP server (`QuietThreadPoolHTTPServer` with 8 worker threads) and an 8-worker payload executor, guaranteeing predictable resource usage and preventing thread exhaustion.
+- **High-Performance In-Memory Cache**: responses are cached as pre-serialized UTF-8 bytes (`cached["bytes"]`), giving cache hits sub-2ms response times with near-zero CPU overhead.
+- **Tiered Cache Windows**:
+  - Device metrics: configurable TTL (default `600s` / 10 minutes, matching Central's internal polling frequency).
+  - Firmware details: 1-hour cache per serial, eliminating hundreds of redundant API calls per sync cycle.
+  - GreenLake OAuth tokens: kept in memory with disk write-through, eliminating disk I/O on every API call.
+- **Stale-While-Revalidate (SWR) with Jitter**: background refreshes use deterministic ±30s TTL jitter to prevent thundering herd / cache stampedes when monitoring large fleets.
+- **Template Hash Check**: skips redundant 68 KB Zabbix template imports if the template has not changed, saving Zabbix API overhead.
 
 ## Requirements
 
@@ -101,7 +111,7 @@ Minimal structure:
     "base_url": "http://ip-or-fqdn-gatewayserver:6767",
     "api_rate_limit_per_second": 8,
     "api_retry_attempts": 3,
-    "device_cache_ttl_seconds": 240,
+    "device_cache_ttl_seconds": 600,
     "site_cache_ttl_seconds": 300,
     "version_check_enabled": true,
     "version_check_ref": "main"
@@ -127,7 +137,7 @@ Important settings:
 - `config_version`: configuration schema version, not the application release version. It changes only when the config format requires special migration handling. Optional backward-compatible settings can be added without changing it.
 - `gateway.base_url`: URL that Zabbix uses to reach the gateway.
 - `gateway.api_rate_limit_per_second`: global Aruba API throttle. Keep it at or below `10`; default is `8`.
-- `gateway.device_cache_ttl_seconds`: cache TTL for device raw data.
+- `gateway.device_cache_ttl_seconds`: cache TTL for device raw data. Default and recommended is `600` (10 minutes), matching Central's internal polling interval and eliminating unnecessary API calls.
 - `gateway.site_cache_ttl_seconds`: cache TTL for site health data.
 - `sync.interval_seconds`: used by the combined `run` command for periodic Zabbix sync.
 - `zabbix.api_url`: Zabbix API endpoint. Use `http://127.0.0.1/api_jsonrpc.php` when the gateway runs on the same Zabbix VM and you want local clear-text API access.
@@ -418,13 +428,25 @@ The bundled template contains:
 
 Device templates use:
 
-- one HTTP agent raw master item
-- dependent items for status, firmware, uptime, CPU, memory, and config status where available
-- basic not-online triggers
-- firmware detail enrichment, including recommended firmware and last upgraded timestamp where Central returns it
-- AP radios/ports/WLAN payloads inside the raw gateway response
-- switch interfaces plus best-effort stack, LAG, VSX, and hardware trend payloads where the tenant/API/model exposes them
-- gateway device basic status, firmware, and ports; gateway-specific monitoring is intentionally minimal in this development branch
+- one HTTP agent raw master item (`central.device.raw`) with `history: 0`
+- dependent items for common core metrics across all devices:
+  - connection status, firmware version, and uptime
+  - CPU and memory utilization
+  - private IP address (`summary.ip`) and public IP address (`summary.public_ip`)
+  - last reboot reason (`summary.last_reboot_reason`)
+  - config synchronization status and endpoint error count
+  - firmware detail enrichment: recommended firmware version, upgrade status, and last upgraded timestamp
+- AP-specific monitoring:
+  - power negotiated state (`summary.negotiated_power`) and default gateway (`summary.default_gateway`)
+  - AP radios, physical Ethernet ports, and WLAN client payloads
+- Switch-specific monitoring:
+  - system temperature in °C (`summary.temperature`)
+  - PoE budget available (`summary.poe_available`), PoE consumption (`summary.poe_consumption`), and total power consumption (`summary.power_consumption`)
+  - aggregated switch counters: total interfaces, interfaces down, total uplinks, uplinks down, aggregated CRC errors, drop counts, neighbours, and failed transceivers
+  - dynamic `Switch uplink discovery` (LLD) extracting speed, duplex, admin/oper status, errors, and LLDP neighbour details for active uplinks
+  - full `Switch interface discovery` (LLD) covering all ports (kept disabled by default to maintain low database volume, easily enabled via LLD macros)
+  - best-effort stack, LAG, VSX, and hardware health payloads where the tenant/API/model exposes them
+- Gateway-specific monitoring: basic status, firmware, and ports
 
 Site templates use:
 
