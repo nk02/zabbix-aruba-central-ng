@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.16"
+APP_VERSION = "2.0.17"
 CONFIG_SCHEMA_VERSION = "2.0.0"
 TEMPLATE_VERSION = "2.0.16"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
@@ -2321,7 +2321,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
             name, res, err = future.result()
             payload[name] = res or ({} if name not in ("interfaces", "ports") else [])
             if err:
-                if name in {"lag_summary", "vsx_detail", "stack_members"} and is_not_found_error(err):
+                if name in {"lag_summary", "vsx_detail", "stack_members", "hardware_trends", "neighbours"} and is_not_found_error(err):
                     continue
                 payload["errors"][name] = err
 
@@ -2331,7 +2331,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         stack_id = first_value(detail_data, "stackId", "stack_id")
         if stack_id:
             stack_path = f"/network-monitoring/v1/stack/{quote(str(stack_id))}/members"
-            val, err = central_get_optional(config, workspace, tenant, stack_path, query)
+            val, err = central_get_optional(config, workspace, tenant, stack_path, None)
             payload["stack_members"] = val or {}
             if err and not is_not_found_error(err):
                 payload["errors"]["stack_members"] = err
