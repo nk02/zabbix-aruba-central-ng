@@ -13,7 +13,8 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import hashlib
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -21,7 +22,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.18"
+APP_VERSION = "2.0.19"
 CONFIG_SCHEMA_VERSION = "2.0.0"
 TEMPLATE_VERSION = "2.0.16"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
@@ -40,8 +41,7 @@ HTTP_CACHE_MAX_AGE_SECONDS = 7 * 86400
 import atexit
 
 RATE_LIMIT_LOCK = threading.Lock()
-RATE_LIMIT_WINDOW = 0.0
-RATE_LIMIT_COUNT = 0
+RATE_LIMIT_NEXT_ALLOWED = 0.0
 HTTP_CACHE_LOCK = threading.Lock()
 HTTP_CACHE: dict[str, dict[str, Any]] = {}
 HTTP_CACHE_DIRTY = False
@@ -52,14 +52,17 @@ IN_FLIGHT_REQUESTS: dict[str, threading.Event] = {}
 PAYLOAD_EXECUTOR_LOCK = threading.Lock()
 PAYLOAD_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 TOKEN_CACHE_LOCK = threading.Lock()
+TOKEN_CACHE_MEM: dict[str, Any] | None = None
 GATEWAY_STATE_LOCK = threading.Lock()
 GATEWAY_STATE_MEM_CACHE: dict[str, Any] | None = None
 GATEWAY_STATE_MTIME_NS: int | None = None
 GATEWAY_STATE_LAST_STAT = 0.0
 PACKAGE_VERSION_LOCK = threading.Lock()
 PACKAGE_VERSION_CACHE: dict[str, dict[str, Any]] = {}
+LAST_IMPORTED_TEMPLATE_HASH: str | None = None
 
-def get_payload_executor(max_workers: int = 16) -> concurrent.futures.ThreadPoolExecutor:
+
+def get_payload_executor(max_workers: int = 8) -> concurrent.futures.ThreadPoolExecutor:
     global PAYLOAD_EXECUTOR
     with PAYLOAD_EXECUTOR_LOCK:
         if PAYLOAD_EXECUTOR is None:
@@ -347,16 +350,23 @@ def config_check(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def token_cache_load() -> dict[str, Any]:
+    global TOKEN_CACHE_MEM
+    if TOKEN_CACHE_MEM is not None:
+        return TOKEN_CACHE_MEM
     if not TOKEN_CACHE_PATH.exists():
-        return {}
+        TOKEN_CACHE_MEM = {}
+        return TOKEN_CACHE_MEM
     try:
         data = json.loads(TOKEN_CACHE_PATH.read_text(encoding="utf-8"))
+        TOKEN_CACHE_MEM = data if isinstance(data, dict) else {}
     except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
+        TOKEN_CACHE_MEM = {}
+    return TOKEN_CACHE_MEM
 
 
 def token_cache_save(cache: dict[str, Any]) -> None:
+    global TOKEN_CACHE_MEM
+    TOKEN_CACHE_MEM = cache
     write_json_atomic(TOKEN_CACHE_PATH, cache)
 
 
@@ -396,20 +406,17 @@ def env_int(name: str, default: int, minimum: int | None = None, maximum: int | 
 
 
 def throttle_central(config: dict[str, Any]) -> None:
-    global RATE_LIMIT_WINDOW, RATE_LIMIT_COUNT
+    global RATE_LIMIT_NEXT_ALLOWED
     gateway = config_section(config, "gateway")
     limit = int(gateway.get("api_rate_limit_per_second") or 8)
     limit = max(1, min(10, limit))
-    while True:
-        with RATE_LIMIT_LOCK:
-            now = time.monotonic()
-            if now - RATE_LIMIT_WINDOW >= 1:
-                RATE_LIMIT_WINDOW = now
-                RATE_LIMIT_COUNT = 0
-            if RATE_LIMIT_COUNT < limit:
-                RATE_LIMIT_COUNT += 1
-                return
-            sleep_for = max(0.01, 1 - (now - RATE_LIMIT_WINDOW))
+    interval = 1.0 / limit
+    with RATE_LIMIT_LOCK:
+        now = time.monotonic()
+        scheduled = max(now, RATE_LIMIT_NEXT_ALLOWED)
+        RATE_LIMIT_NEXT_ALLOWED = scheduled + interval
+    sleep_for = scheduled - now
+    if sleep_for > 0:
         time.sleep(sleep_for)
 
 
@@ -1074,11 +1081,11 @@ def save_gateway_state(state: dict[str, Any]) -> None:
 
 
 def load_gateway_state() -> dict[str, Any]:
-    global GATEWAY_STATE_MEM_CACHE, GATEWAY_STATE_MTIME_NS, GATEWAY_STATE_LAST_STAT
+    global GATEWAY_STATE_MEM_CACHE, GATEWAY_STATE_MTIME_NS, GATEWAY_STATE_LAST_STAT, LAST_IMPORTED_TEMPLATE_HASH
     with GATEWAY_STATE_LOCK:
         now_mono = time.monotonic()
-        # Avoid stat() disk call on every single request: cache stat for 2.0s
-        if GATEWAY_STATE_MEM_CACHE is not None and now_mono - GATEWAY_STATE_LAST_STAT < 2.0:
+        # Avoid stat() disk call on hot request paths: cache stat for 15.0s
+        if GATEWAY_STATE_MEM_CACHE is not None and now_mono - GATEWAY_STATE_LAST_STAT < 15.0:
             return GATEWAY_STATE_MEM_CACHE
         GATEWAY_STATE_LAST_STAT = now_mono
         if not GATEWAY_STATE_PATH.exists():
@@ -1097,6 +1104,10 @@ def load_gateway_state() -> dict[str, Any]:
                     if isinstance(dev, dict) and dev.get("site_id"):
                         by_site[str(dev["site_id"])] = dev
                 data["_by_site_id"] = by_site
+                if LAST_IMPORTED_TEMPLATE_HASH is None:
+                    stored_hash = (data.get("zabbix") or {}).get("template_hash")
+                    if isinstance(stored_hash, str) and stored_hash:
+                        LAST_IMPORTED_TEMPLATE_HASH = stored_hash
                 GATEWAY_STATE_MEM_CACHE = data
                 GATEWAY_STATE_MTIME_NS = mtime_ns
                 return data
@@ -1389,12 +1400,21 @@ def render_zabbix_template_source(config: dict[str, Any]) -> tuple[str, list[str
     return source, all_group_names
 
 
-def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
+def import_zabbix_template(config: dict[str, Any], apply: bool = False, force: bool = False) -> dict[str, Any]:
+    global LAST_IMPORTED_TEMPLATE_HASH
     result = {"apply": apply, "path": str(TEMPLATE_PATH), "templates": template_names(), "template_groups": [zabbix_template_group(config)]}
     if not apply:
         return result
     source, groups = render_zabbix_template_source(config)
     result["template_groups"] = groups
+    template_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    if not force and LAST_IMPORTED_TEMPLATE_HASH == template_hash:
+        result["imported"] = False
+        result["skipped"] = True
+        result["reason"] = "template_unchanged"
+        LOGGER.info("Zabbix template unchanged (hash matches); skipping configuration.import")
+        return result
+
     zabbix_api_call(config, "configuration.import", {
         "format": "yaml",
         "rules": {
@@ -1407,7 +1427,9 @@ def import_zabbix_template(config: dict[str, Any], apply: bool = False) -> dict[
         },
         "source": source,
     })
+    LAST_IMPORTED_TEMPLATE_HASH = template_hash
     result["imported"] = True
+    result["template_hash"] = template_hash
     return result
 
 
@@ -1749,6 +1771,7 @@ def sync_zabbix(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
         "stale_managed_host_count": len(stale_hosts),
         "stale_managed_host_names": ", ".join(stale_hosts),
         "stale_managed_hosts": stale_hosts,
+        "template_hash": LAST_IMPORTED_TEMPLATE_HASH,
     }
     save_gateway_state(state)
     results = [ensure_host(config, plan, apply, sync_cache=sync_cache) for plan in plans]
@@ -2398,8 +2421,8 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         })
 
     payload: dict[str, Any] = {"errors": {}}
-    max_workers = int(config_section(config, "gateway").get("max_payload_workers") or 5)
-    executor = get_payload_executor(max_workers=max(16, max_workers * 3))
+    max_workers = int(config_section(config, "gateway").get("max_payload_workers") or 8)
+    executor = get_payload_executor(max_workers=max_workers)
 
     def worker(name: str, path: str, q: dict[str, Any] | None, is_pages: bool) -> tuple[str, Any, str | None]:
         try:
@@ -2442,23 +2465,78 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
     return payload
 
 
+def key_jitter_seconds(key: str, max_jitter: int = 30) -> int:
+    return (abs(hash(key)) % (max_jitter * 2 + 1)) - max_jitter
+
+
+def _fetch_and_build_device_body(config: dict[str, Any], key: str, device: dict[str, Any]) -> dict[str, Any]:
+    workspace = find_workspace(config, str(device["workspace_id"]))
+    tenant = gateway_tenant_record(device)
+    payload = collect_device_payload(config, workspace, tenant, device)
+    summary = normalize_summary(str(device["kind"]), payload, device)
+    body = {
+        "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
+        "device": {k: v for k, v in device.items() if k != "central_base_url"},
+        "summary": summary,
+        "uplinks": payload.get("uplinks") if isinstance(payload.get("uplinks"), list) else [],
+        "data": payload,
+    }
+    if str(device["kind"]) == "switch":
+        body["optional"] = optional_switch_discovery(summary)
+    return body
+
+
+def trigger_background_device_fetch(config: dict[str, Any], key: str, device: dict[str, Any]) -> None:
+    cache_key = f"device:{key}"
+    with IN_FLIGHT_LOCK:
+        if key in IN_FLIGHT_REQUESTS:
+            return
+        event = threading.Event()
+        IN_FLIGHT_REQUESTS[key] = event
+    executor = get_payload_executor()
+    executor.submit(_background_device_fetch_worker, config, key, device, cache_key, event)
+
+
+def _background_device_fetch_worker(config: dict[str, Any], key: str, device: dict[str, Any], cache_key: str, event: threading.Event) -> None:
+    try:
+        body = _fetch_and_build_device_body(config, key, device)
+        update_cache(cache_key, body)
+    except Exception as exc:
+        LOGGER.warning(f"Background refresh failed for device {key}: {exc}")
+    finally:
+        with IN_FLIGHT_LOCK:
+            IN_FLIGHT_REQUESTS.pop(key, None)
+            event.set()
+
+
 def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, dict[str, Any]]:
     state = load_gateway_state()
     devices = state.get("devices") if isinstance(state.get("devices"), dict) else {}
     device = devices.get(key)
     if not isinstance(device, dict):
         return 404, {"gateway": {"status": "not_found"}, "error": f"Device key {key} not found. Run sync-zabbix first."}
-    # Default TTL increased to 600s (10m) to prevent cache collapse in large environments
-    ttl = int(config_section(config, "gateway").get("device_cache_ttl_seconds") or 600)
+
+    base_ttl = int(config_section(config, "gateway").get("device_cache_ttl_seconds") or 600)
+    ttl = max(120, base_ttl + key_jitter_seconds(key, 30))
     cache_key = f"device:{key}"
+
     with HTTP_CACHE_LOCK:
         cached = HTTP_CACHE.get(cache_key)
-        if cached and utc_now() - int(cached.get("fetched_at") or 0) < ttl:
-            body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="hit")
-            return 200, body
+        if cached and isinstance(cached.get("body"), dict):
+            age = utc_now() - int(cached.get("fetched_at") or 0)
+            soft_window = max(30, int(ttl * 0.25))
+            if age < (ttl - soft_window):
+                body = dict(cached["body"])
+                body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="hit", age=age)
+                return 200, body
+            if age < (ttl * 2):
+                trigger_background_device_fetch(config, key, device)
+                body = dict(cached["body"])
+                cache_label = "hit" if age < ttl else "hit_stale"
+                body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache=cache_label, age=age)
+                return 200, body
 
-    # Single-flight deduplication: if this key is already being fetched, wait for the in-progress fetch
+    # Single-flight deduplication for cold misses
     wait_event = None
     with IN_FLIGHT_LOCK:
         if key in IN_FLIGHT_REQUESTS:
@@ -2471,31 +2549,19 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
         wait_event.wait(timeout=25.0)
         with HTTP_CACHE_LOCK:
             cached = HTTP_CACHE.get(cache_key)
-            if cached:
+            if cached and isinstance(cached.get("body"), dict):
                 body = dict(cached["body"])
                 body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="hit_inflight")
                 return 200, body
 
     try:
-        workspace = find_workspace(config, str(device["workspace_id"]))
-        tenant = gateway_tenant_record(device)
-        payload = collect_device_payload(config, workspace, tenant, device)
-        summary = normalize_summary(str(device["kind"]), payload, device)
-        body = {
-            "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
-            "device": {k: v for k, v in device.items() if k != "central_base_url"},
-            "summary": summary,
-            "uplinks": payload.get("uplinks") if isinstance(payload.get("uplinks"), list) else [],
-            "data": payload,
-        }
-        if str(device["kind"]) == "switch":
-            body["optional"] = optional_switch_discovery(summary)
+        body = _fetch_and_build_device_body(config, key, device)
         update_cache(cache_key, body)
         return 200, body
     except Exception as exc:
         with HTTP_CACHE_LOCK:
             cached = HTTP_CACHE.get(cache_key)
-        if cached:
+        if cached and isinstance(cached.get("body"), dict):
             body = dict(cached["body"])
             body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
             return 200, body
@@ -2523,19 +2589,73 @@ def context_for_site(config: dict[str, Any], site_id: str) -> tuple[dict[str, An
     return None
 
 
+def trigger_background_site_health_fetch(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], site_id: str, cache_key: str) -> None:
+    flight_key = f"site-health:{site_id}"
+    with IN_FLIGHT_LOCK:
+        if flight_key in IN_FLIGHT_REQUESTS:
+            return
+        event = threading.Event()
+        IN_FLIGHT_REQUESTS[flight_key] = event
+    executor = get_payload_executor()
+    executor.submit(_background_site_health_worker, config, workspace, tenant, site_id, cache_key, flight_key, event)
+
+
+def _background_site_health_worker(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], site_id: str, cache_key: str, flight_key: str, event: threading.Event) -> None:
+    try:
+        data = central_get(config, workspace, tenant, f"/network-monitoring/v1/site-health/{quote(site_id)}")
+        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
+        update_cache(cache_key, body)
+    except Exception as exc:
+        LOGGER.warning(f"Background refresh failed for site {site_id}: {exc}")
+    finally:
+        with IN_FLIGHT_LOCK:
+            IN_FLIGHT_REQUESTS.pop(flight_key, None)
+            event.set()
+
+
 def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tuple[int, dict[str, Any]]:
     context = context_for_site(config, site_id)
     if not context:
         return 404, {"gateway": {"status": "not_found"}, "error": f"Site {site_id} not found in gateway state"}
     workspace, tenant = context
-    ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 600)
+    base_ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 600)
+    ttl = max(120, base_ttl + key_jitter_seconds(site_id, 30))
     cache_key = f"site-health:{tenant['tenant_id']}:{site_id}"
+    flight_key = f"site-health:{site_id}"
+
     with HTTP_CACHE_LOCK:
         cached = HTTP_CACHE.get(cache_key)
-        if cached and utc_now() - int(cached.get("fetched_at") or 0) < ttl:
-            body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, cache="hit")
-            return 200, body
+        if cached and isinstance(cached.get("body"), dict):
+            age = utc_now() - int(cached.get("fetched_at") or 0)
+            soft_window = max(30, int(ttl * 0.25))
+            if age < (ttl - soft_window):
+                body = dict(cached["body"])
+                body["gateway"] = dict(body.get("gateway") or {}, cache="hit", age=age)
+                return 200, body
+            if age < (ttl * 2):
+                trigger_background_site_health_fetch(config, workspace, tenant, site_id, cache_key)
+                body = dict(cached["body"])
+                cache_label = "hit" if age < ttl else "hit_stale"
+                body["gateway"] = dict(body.get("gateway") or {}, cache=cache_label, age=age)
+                return 200, body
+
+    wait_event = None
+    with IN_FLIGHT_LOCK:
+        if flight_key in IN_FLIGHT_REQUESTS:
+            wait_event = IN_FLIGHT_REQUESTS[flight_key]
+        else:
+            in_flight_event = threading.Event()
+            IN_FLIGHT_REQUESTS[flight_key] = in_flight_event
+
+    if wait_event is not None:
+        wait_event.wait(timeout=25.0)
+        with HTTP_CACHE_LOCK:
+            cached = HTTP_CACHE.get(cache_key)
+            if cached and isinstance(cached.get("body"), dict):
+                body = dict(cached["body"])
+                body["gateway"] = dict(body.get("gateway") or {}, cache="hit_inflight")
+                return 200, body
+
     try:
         data = central_get(config, workspace, tenant, f"/network-monitoring/v1/site-health/{quote(site_id)}")
         body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
@@ -2544,11 +2664,16 @@ def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tu
     except Exception as exc:
         with HTTP_CACHE_LOCK:
             cached = HTTP_CACHE.get(cache_key)
-        if cached:
+        if cached and isinstance(cached.get("body"), dict):
             body = dict(cached["body"])
             body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
             return 200, body
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
+    finally:
+        with IN_FLIGHT_LOCK:
+            fin_event = IN_FLIGHT_REQUESTS.pop(flight_key, None)
+            if fin_event is not None:
+                fin_event.set()
 
 
 def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str, query_params: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
@@ -2558,7 +2683,8 @@ def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str,
     workspace, tenant = context
     window_ms = int(query_params.get("window-ms", ["3600000"])[0])
     field = query_params.get("field", ["topreasons"])[0]
-    ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 300)
+    base_ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 300)
+    ttl = max(60, base_ttl + key_jitter_seconds(f"{site_id}:{field}", 30))
     cache_key = f"client-onboarding:{tenant['tenant_id']}:{site_id}:{field}:{window_ms}"
     with HTTP_CACHE_LOCK:
         cached = HTTP_CACHE.get(cache_key)
@@ -2602,15 +2728,44 @@ def gateway_health(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-class QuietThreadingHTTPServer(ThreadingHTTPServer):
-    daemon_threads = True
+class QuietThreadPoolHTTPServer(HTTPServer):
     allow_reuse_address = True
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        RequestHandlerClass: type[BaseHTTPRequestHandler],
+        max_workers: int = 8,
+    ) -> None:
+        super().__init__(server_address, RequestHandlerClass)
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="HttpWorker",
+        )
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        self.executor.submit(self._dispatch_request, request, client_address)
+
+    def _dispatch_request(self, request: Any, client_address: Any) -> None:
+        try:
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
+        finally:
+            self.shutdown_request(request)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         exc_type, exc, _ = sys.exc_info()
         if exc_type and isinstance(exc, (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, TimeoutError)):
             return
         super().handle_error(request, client_address)
+
+    def server_close(self) -> None:
+        try:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        super().server_close()
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
@@ -2664,9 +2819,10 @@ def run_gateway(config: dict[str, Any]) -> None:
     gateway = config_section(config, "gateway")
     listen = str(gateway.get("listen") or "0.0.0.0")
     port = int(gateway.get("port") or 6767)
+    max_http_workers = int(gateway.get("max_http_workers") or 8)
     GatewayHandler.config = config
-    server = QuietThreadingHTTPServer((listen, port), GatewayHandler)
-    LOGGER.info(f"Gateway listening on {listen}:{port} (version {APP_VERSION})")
+    server = QuietThreadPoolHTTPServer((listen, port), GatewayHandler, max_workers=max_http_workers)
+    LOGGER.info(f"Gateway listening on {listen}:{port} (version {APP_VERSION}, http_workers={max_http_workers})")
     server.serve_forever()
 
 
