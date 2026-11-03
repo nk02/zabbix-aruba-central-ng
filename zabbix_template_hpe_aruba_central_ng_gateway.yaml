@@ -21,7 +21,7 @@ zabbix_export:
       value: '7200'
       description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.15
+      value: 2.0.16
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -1124,7 +1124,7 @@ zabbix_export:
           - $.summary.stack_member_count
         master_item:
           key: central.device.raw
-      - uuid: ad8ccf044bb711eeb82c16c4e2df96eb
+      - uuid: 4208a40d307d4fa58fe828ca9dc005b0
         name: Switch stack member offline count
         type: DEPENDENT
         key: 'central.switch.stack_member_offline_count[{#FEATURE_ID}]'

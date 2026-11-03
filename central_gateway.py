@@ -21,9 +21,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.15"
+APP_VERSION = "2.0.16"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.15"
+TEMPLATE_VERSION = "2.0.16"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -604,20 +604,44 @@ def get_all_pages(
     offset = 0
     limit = 1000
     results: list[dict[str, Any]] = []
+    use_next_cursor = path.startswith("/network-monitoring/")
+    next_cursor: Any = None
     while True:
-        params = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit}
         if query:
             params.update(query)
-        data = central_get(config, workspace, tenant, path, params)
+        if use_next_cursor:
+            params.pop("offset", None)
+            if next_cursor is not None:
+                params["next"] = next_cursor
+        else:
+            params["offset"] = offset
+
+        try:
+            data = central_get(config, workspace, tenant, path, params)
+        except CentralError as exc:
+            if not use_next_cursor and "Unknown query parameter: offset" in str(exc):
+                use_next_cursor = True
+                params.pop("offset", None)
+                data = central_get(config, workspace, tenant, path, params)
+            else:
+                raise
+
         items = data.get("items")
         if not isinstance(items, list):
             items = data.get("data") if isinstance(data.get("data"), list) else []
         records = [item for item in items if isinstance(item, dict)]
         results.extend(records)
         total = int(data.get("total") or len(results))
-        offset += len(records)
-        if not records or offset >= total:
-            break
+
+        if use_next_cursor:
+            next_cursor = data.get("next")
+            if not records or not next_cursor or len(results) >= total:
+                break
+        else:
+            offset += len(records)
+            if not records or offset >= total:
+                break
     return results
 
 
@@ -840,11 +864,6 @@ def switch_inventory(config: dict[str, Any], workspace: dict[str, Any], tenant: 
         workspace,
         tenant,
         "/network-monitoring/v1/switches",
-        {
-            "fields": "status,macaddr,model,ip_address,firmware_version,uplink_ports,site",
-            "show_resource_details": "true",
-            "calculate_client_count": "true",
-        },
     )
     if err:
         LOGGER.warning(
@@ -2258,31 +2277,29 @@ def optional_switch_discovery(summary: dict[str, Any]) -> dict[str, list[dict[st
 def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
     kind = str(device["kind"])
     serial = str(device["serial"])
-    site_id = str(device["site_id"]) if device.get("site_id") else ""
-    query = {"site-id": site_id} if site_id else None
 
     tasks = {
-        "details": (device_path(kind, serial), query, False),
+        "details": (device_path(kind, serial), None, False),
         "firmware": ("/network-services/v1/firmware-details", {"limit": 1000, "filter": firmware_filter(serial)}, False),
     }
 
     if kind == "ap":
         tasks.update({
-            "radios": (f"/network-monitoring/v1/aps/{quote(serial)}/radios", query, False),
-            "ports": (f"/network-monitoring/v1/aps/{quote(serial)}/ports", query, False),
-            "wlans": (f"/network-monitoring/v1/aps/{quote(serial)}/wlans", query, False),
+            "radios": (f"/network-monitoring/v1/aps/{quote(serial)}/radios", None, False),
+            "ports": (f"/network-monitoring/v1/aps/{quote(serial)}/ports", None, False),
+            "wlans": (f"/network-monitoring/v1/aps/{quote(serial)}/wlans", None, False),
         })
     elif kind == "switch":
         tasks.update({
-            "interfaces": (f"/network-monitoring/v1/switches/{quote(serial)}/interfaces", query, True),
-            "hardware_trends": (f"/network-monitoring/v1/switches/{quote(serial)}/hardware-trends", query, False),
-            "lag_summary": (f"/network-monitoring/v1/switches/{quote(serial)}/lag-summary", query, False),
-            "vsx_detail": (f"/network-monitoring/v1/switches/{quote(serial)}/vsx", query, False),
-            "neighbours": (f"/network-monitoring/v1/neighbours/{quote(serial)}", query, False),
+            "interfaces": (f"/network-monitoring/v1/switches/{quote(serial)}/interfaces", None, True),
+            "hardware_trends": (f"/network-monitoring/v1/switches/{quote(serial)}/hardware-trends", None, False),
+            "lag_summary": (f"/network-monitoring/v1/switches/{quote(serial)}/lag-summary", None, False),
+            "vsx_detail": (f"/network-monitoring/v1/switches/{quote(serial)}/vsx", None, False),
+            "neighbours": (f"/network-monitoring/v1/neighbours/{quote(serial)}", None, False),
         })
     elif kind == "gateway":
         tasks.update({
-            "ports": (f"/network-monitoring/v1/gateways/{quote(serial)}/ports", query, True),
+            "ports": (f"/network-monitoring/v1/gateways/{quote(serial)}/ports", None, True),
         })
 
     payload: dict[str, Any] = {"errors": {}}
@@ -2576,6 +2593,8 @@ def main() -> int:
         if args.command == "run":
             run_combined(config)
             return 0
+    except KeyboardInterrupt:
+        return 0
     except (ConfigError, CentralError, ZabbixError) as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=True))
         return 1
