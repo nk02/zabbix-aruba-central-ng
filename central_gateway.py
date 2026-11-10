@@ -22,9 +22,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.21"
+APP_VERSION = "2.0.22"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.17"
+TEMPLATE_VERSION = "2.0.18"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -61,7 +61,12 @@ PACKAGE_VERSION_LOCK = threading.Lock()
 PACKAGE_VERSION_CACHE: dict[str, dict[str, Any]] = {}
 LAST_IMPORTED_TEMPLATE_HASH: str | None = None
 FIRMWARE_CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
+TENANT_FIRMWARE_CACHE: dict[str, int] = {}
 FIRMWARE_CACHE_LOCK = threading.Lock()
+OPTIONAL_404_CACHE: dict[str, int] = {}
+ALT_PATH_CACHE: dict[str, str] = {}
+OPTIONAL_404_LOCK = threading.Lock()
+OPTIONAL_404_TTL_SECONDS = 43200
 
 
 def get_cached_firmware(serial: str) -> dict[str, Any] | None:
@@ -682,15 +687,36 @@ def central_get_optional(
     path: str,
     query: dict[str, str | int] | None = None,
 ) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None]:
+    cache_key = f"{tenant.get('tenant_id')}:{path}" if query is None else ""
+    if cache_key:
+        now = utc_now()
+        with OPTIONAL_404_LOCK:
+            ts = OPTIONAL_404_CACHE.get(cache_key)
+            if ts is not None and now - ts < OPTIONAL_404_TTL_SECONDS:
+                return None, "HTTP 404 Route Not Found (cached)"
+            alt_cached = ALT_PATH_CACHE.get(cache_key)
+        if alt_cached:
+            try:
+                return central_get(config, workspace, tenant, alt_cached, query), None
+            except CentralError:
+                with OPTIONAL_404_LOCK:
+                    ALT_PATH_CACHE.pop(cache_key, None)
     try:
         return central_get(config, workspace, tenant, path, query), None
     except CentralError as exc:
         if is_not_found_error(str(exc)):
             for alt in alternate_paths(path):
                 try:
-                    return central_get(config, workspace, tenant, alt, query), None
+                    res = central_get(config, workspace, tenant, alt, query)
+                    if cache_key:
+                        with OPTIONAL_404_LOCK:
+                            ALT_PATH_CACHE[cache_key] = alt
+                    return res, None
                 except CentralError:
                     continue
+            if cache_key:
+                with OPTIONAL_404_LOCK:
+                    OPTIONAL_404_CACHE[cache_key] = utc_now()
         return None, str(exc)
 
 
@@ -752,15 +778,36 @@ def get_all_pages_optional(
     path: str,
     query: dict[str, str | int] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
+    cache_key = f"{tenant.get('tenant_id')}:{path}" if query is None else ""
+    if cache_key:
+        now = utc_now()
+        with OPTIONAL_404_LOCK:
+            ts = OPTIONAL_404_CACHE.get(cache_key)
+            if ts is not None and now - ts < OPTIONAL_404_TTL_SECONDS:
+                return [], "HTTP 404 Route Not Found (cached)"
+            alt_cached = ALT_PATH_CACHE.get(cache_key)
+        if alt_cached:
+            try:
+                return get_all_pages(config, workspace, tenant, alt_cached, query), None
+            except CentralError:
+                with OPTIONAL_404_LOCK:
+                    ALT_PATH_CACHE.pop(cache_key, None)
     try:
         return get_all_pages(config, workspace, tenant, path, query), None
     except CentralError as exc:
         if is_not_found_error(str(exc)):
             for alt in alternate_paths(path):
                 try:
-                    return get_all_pages(config, workspace, tenant, alt, query), None
+                    res = get_all_pages(config, workspace, tenant, alt, query)
+                    if cache_key:
+                        with OPTIONAL_404_LOCK:
+                            ALT_PATH_CACHE[cache_key] = alt
+                    return res, None
                 except CentralError:
                     continue
+            if cache_key:
+                with OPTIONAL_404_LOCK:
+                    OPTIONAL_404_CACHE[cache_key] = utc_now()
         return [], str(exc)
 
 
@@ -1524,7 +1571,7 @@ def host_has_tag(tags: list[dict[str, Any]], wanted: dict[str, str]) -> bool:
 
 def zabbix_host(config: dict[str, Any], host: str) -> dict[str, Any] | None:
     hosts = zabbix_api_call(config, "host.get", {
-        "output": ["hostid", "host", "name"],
+        "output": ["hostid", "host", "name", "inventory_mode"],
         "selectTags": "extend",
         "selectMacros": "extend",
         "selectParentTemplates": ["templateid", "host"],
@@ -1536,7 +1583,7 @@ def zabbix_host(config: dict[str, Any], host: str) -> dict[str, Any] | None:
 def zabbix_managed_site_host(config: dict[str, Any], site_id: str) -> dict[str, Any] | None:
     tag = managed_tag(config)
     hosts = zabbix_api_call(config, "host.get", {
-        "output": ["hostid", "host", "name"],
+        "output": ["hostid", "host", "name", "inventory_mode"],
         "selectTags": "extend",
         "selectMacros": "extend",
         "selectParentTemplates": ["templateid", "host"],
@@ -1555,7 +1602,7 @@ def zabbix_managed_site_host(config: dict[str, Any], site_id: str) -> dict[str, 
 def zabbix_managed_device_host(config: dict[str, Any], device_key: str) -> dict[str, Any] | None:
     tag = managed_tag(config)
     hosts = zabbix_api_call(config, "host.get", {
-        "output": ["hostid", "host", "name"],
+        "output": ["hostid", "host", "name", "inventory_mode"],
         "selectTags": "extend",
         "selectMacros": "extend",
         "selectParentTemplates": ["templateid", "host"],
@@ -1574,7 +1621,7 @@ def zabbix_managed_device_host(config: dict[str, Any], device_key: str) -> dict[
 def managed_zabbix_hosts(config: dict[str, Any]) -> list[dict[str, Any]]:
     tag = managed_tag(config)
     hosts = zabbix_api_call(config, "host.get", {
-        "output": ["hostid", "host", "name"],
+        "output": ["hostid", "host", "name", "inventory_mode"],
         "selectTags": "extend",
         "selectMacros": "extend",
         "selectParentTemplates": ["templateid", "host"],
@@ -1646,7 +1693,8 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool, sync_
     macros = {
         "{$CENTRAL.GATEWAY.URL}": str(config_section(config, "gateway").get("base_url") or "http://127.0.0.1:6767"),
     }
-    if plan.get("device_key"):
+    is_device_host = bool(plan.get("device_key"))
+    if is_device_host:
         macros.update({
             "{$CENTRAL.DEVICE.KEY}": str(plan["device_key"]),
             "{$CENTRAL.DEVICE.TYPE}": str(plan["kind"]),
@@ -1672,6 +1720,8 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool, sync_
         needs_update = False
         if str(existing.get("name") or "") != desired_name or str(existing.get("host") or "") != plan["host"]:
             needs_update = True
+        elif is_device_host and str(existing.get("inventory_mode") or "-1") != "1":
+            needs_update = True
         else:
             existing_macro_map = {str(m.get("macro")): str(m.get("value") or "") for m in existing.get("macros") or [] if isinstance(m, dict) and m.get("macro")}
             desired_macro_map = {str(m["macro"]): str(m["value"]) for m in desired_macros}
@@ -1696,6 +1746,8 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool, sync_
                 "macros": desired_macros,
                 "templates": desired_templates,
             }
+            if is_device_host:
+                params["inventory_mode"] = 1
             zabbix_api_call(config, "host.update", params)
             result["updated"] = True
         return result
@@ -1707,6 +1759,8 @@ def ensure_host(config: dict[str, Any], plan: dict[str, Any], apply: bool, sync_
         "tags": tags,
         "macros": merge_macros([], macros),
     }
+    if is_device_host:
+        params["inventory_mode"] = 1
     created = zabbix_api_call(config, "host.create", params)
     result["created"] = bool(created.get("hostids"))
     return result
@@ -2469,16 +2523,52 @@ def optional_switch_discovery(summary: dict[str, Any]) -> dict[str, list[dict[st
     return features
 
 
+def ensure_firmware_for_device(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], serial: str) -> tuple[dict[str, Any], str | None]:
+    cached = get_cached_firmware(serial)
+    if cached is not None:
+        return cached, None
+    tenant_id = str(tenant.get("tenant_id") or "")
+    now = utc_now()
+    should_fetch_tenant = False
+    with FIRMWARE_CACHE_LOCK:
+        last_tenant_fetch = TENANT_FIRMWARE_CACHE.get(tenant_id, 0)
+        if now - last_tenant_fetch >= 3600:
+            TENANT_FIRMWARE_CACHE[tenant_id] = now
+            should_fetch_tenant = True
+    if should_fetch_tenant:
+        records, err = get_all_pages_optional(config, workspace, tenant, "/network-services/v1/firmware-details")
+        if records:
+            now_ts = utc_now()
+            with FIRMWARE_CACHE_LOCK:
+                for rec in records:
+                    rec_serial = str(first_value(rec, "serialNumber", "serial", "id") or "")
+                    if rec_serial:
+                        FIRMWARE_CACHE[rec_serial] = (now_ts, {"items": [rec]})
+            cached = get_cached_firmware(serial)
+            if cached is not None:
+                return cached, None
+            set_cached_firmware(serial, {})
+            return {}, None
+    res, err = central_get_optional(
+        config,
+        workspace,
+        tenant,
+        "/network-services/v1/firmware-details",
+        {"limit": 1000, "filter": firmware_filter(serial)},
+    )
+    if res:
+        set_cached_firmware(serial, res)
+        return res, None
+    return {}, err
+
+
 def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
     kind = str(device["kind"])
     serial = str(device["serial"])
 
-    cached_fw = get_cached_firmware(serial)
-    tasks = {
+    tasks: dict[str, tuple[str, dict[str, Any] | None, bool]] = {
         "details": (device_path(kind, serial), None, False),
     }
-    if cached_fw is None:
-        tasks["firmware"] = ("/network-services/v1/firmware-details", {"limit": 1000, "filter": firmware_filter(serial)}, False)
 
     if kind == "ap":
         tasks.update({
@@ -2513,19 +2603,22 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         except Exception as e:
             return name, None, str(e)
 
+    def fw_worker() -> tuple[str, Any, str | None]:
+        try:
+            res, err = ensure_firmware_for_device(config, workspace, tenant, serial)
+            return "firmware", res, err
+        except Exception as e:
+            return "firmware", {}, str(e)
+
     futures = [executor.submit(worker, name, path, q, is_pages) for name, (path, q, is_pages) in tasks.items()]
+    futures.append(executor.submit(fw_worker))
     for future in concurrent.futures.as_completed(futures):
         name, res, err = future.result()
         payload[name] = res or ({} if name not in ("interfaces", "ports") else [])
         if err:
-            if name in {"lag_summary", "vsx_detail", "stack_members", "hardware_trends", "neighbours"} and is_not_found_error(err):
+            if name in {"lag_summary", "vsx_detail", "stack_members", "hardware_trends", "neighbours", "firmware"} and is_not_found_error(err):
                 continue
             payload["errors"][name] = err
-
-    if "firmware" in payload and payload["firmware"]:
-        set_cached_firmware(serial, payload["firmware"])
-    elif cached_fw is not None:
-        payload["firmware"] = cached_fw
 
     if kind == "switch":
         payload["interfaces"] = normalize_interface_records(payload.get("interfaces") or [])
@@ -2772,22 +2865,102 @@ def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tu
                 fin_event.set()
 
 
-def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str, query_params: dict[str, list[str]]) -> tuple[int, dict[str, Any]]:
+def trigger_background_client_onboarding_fetch(
+    config: dict[str, Any],
+    workspace: dict[str, Any],
+    tenant: dict[str, Any],
+    site_id: str,
+    field: str,
+    window_ms: int,
+    cache_key: str,
+    flight_key: str,
+) -> None:
+    with IN_FLIGHT_LOCK:
+        if flight_key in IN_FLIGHT_REQUESTS:
+            return
+        event = threading.Event()
+        IN_FLIGHT_REQUESTS[flight_key] = event
+    executor = get_payload_executor()
+    executor.submit(_background_client_onboarding_worker, config, workspace, tenant, site_id, field, window_ms, cache_key, flight_key, event)
+
+
+def _background_client_onboarding_worker(
+    config: dict[str, Any],
+    workspace: dict[str, Any],
+    tenant: dict[str, Any],
+    site_id: str,
+    field: str,
+    window_ms: int,
+    cache_key: str,
+    flight_key: str,
+    event: threading.Event,
+) -> None:
+    try:
+        end_ms = int(time.time() * 1000)
+        start_ms = end_ms - window_ms
+        params = {"site-id": site_id, "start-at": start_ms, "end-at": end_ms, "field": field}
+        data = central_get(config, workspace, tenant, "/network-monitoring/v1/client-onboarding-stage/count", params)
+        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
+        update_cache(cache_key, body)
+    except Exception as exc:
+        LOGGER.warning(f"Background refresh failed for client-onboarding site {site_id}: {exc}")
+    finally:
+        with IN_FLIGHT_LOCK:
+            IN_FLIGHT_REQUESTS.pop(flight_key, None)
+            event.set()
+
+
+def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str, query_params: dict[str, list[str]]) -> tuple[int, dict[str, Any] | bytes]:
     context = context_for_site(config, site_id)
     if not context:
         return 404, {"gateway": {"status": "not_found"}, "error": f"Site {site_id} not found in gateway state"}
     workspace, tenant = context
     window_ms = int(query_params.get("window-ms", ["3600000"])[0])
     field = query_params.get("field", ["topreasons"])[0]
-    base_ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 300)
-    ttl = max(60, base_ttl + key_jitter_seconds(f"{site_id}:{field}", 30))
+    base_ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 600)
+    ttl = max(120, base_ttl + key_jitter_seconds(f"{site_id}:{field}", 30))
     cache_key = f"client-onboarding:{tenant['tenant_id']}:{site_id}:{field}:{window_ms}"
+    flight_key = f"client-onboarding:{site_id}:{field}:{window_ms}"
+
     with HTTP_CACHE_LOCK:
         cached = HTTP_CACHE.get(cache_key)
-        if cached and utc_now() - int(cached.get("fetched_at") or 0) < ttl:
-            body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, cache="hit")
-            return 200, body
+        if cached and isinstance(cached.get("body"), dict):
+            age = utc_now() - int(cached.get("fetched_at") or 0)
+            soft_window = max(30, int(ttl * 0.25))
+            if age < (ttl - soft_window):
+                raw_bytes = cached.get("bytes")
+                if raw_bytes is not None:
+                    return 200, raw_bytes
+                body = dict(cached["body"])
+                body["gateway"] = dict(body.get("gateway") or {}, cache="hit", age=age)
+                return 200, body
+            if age < (ttl * 2):
+                trigger_background_client_onboarding_fetch(config, workspace, tenant, site_id, field, window_ms, cache_key, flight_key)
+                raw_bytes = cached.get("bytes")
+                if raw_bytes is not None:
+                    return 200, raw_bytes
+                body = dict(cached["body"])
+                cache_label = "hit" if age < ttl else "hit_stale"
+                body["gateway"] = dict(body.get("gateway") or {}, cache=cache_label, age=age)
+                return 200, body
+
+    wait_event = None
+    with IN_FLIGHT_LOCK:
+        if flight_key in IN_FLIGHT_REQUESTS:
+            wait_event = IN_FLIGHT_REQUESTS[flight_key]
+        else:
+            in_flight_event = threading.Event()
+            IN_FLIGHT_REQUESTS[flight_key] = in_flight_event
+
+    if wait_event is not None:
+        wait_event.wait(timeout=25.0)
+        with HTTP_CACHE_LOCK:
+            cached = HTTP_CACHE.get(cache_key)
+            if cached and isinstance(cached.get("body"), dict):
+                body = dict(cached["body"])
+                body["gateway"] = dict(body.get("gateway") or {}, cache="hit_inflight")
+                return 200, body
+
     end_ms = int(time.time() * 1000)
     start_ms = end_ms - window_ms
     params = {"site-id": site_id, "start-at": start_ms, "end-at": end_ms, "field": field}
@@ -2799,11 +2972,16 @@ def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str,
     except Exception as exc:
         with HTTP_CACHE_LOCK:
             cached = HTTP_CACHE.get(cache_key)
-        if cached:
+        if cached and isinstance(cached.get("body"), dict):
             body = dict(cached["body"])
             body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
             return 200, body
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
+    finally:
+        with IN_FLIGHT_LOCK:
+            fin_event = IN_FLIGHT_REQUESTS.pop(flight_key, None)
+            if fin_event is not None:
+                fin_event.set()
 
 
 def gateway_health(config: dict[str, Any]) -> dict[str, Any]:

@@ -20,12 +20,13 @@ The gateway keeps all Aruba API calls behind one rate limiter and provides produ
 
 - **Smooth Rate Limiting**: requests are smoothly paced (125 ms apart for default `8` calls/s) to avoid bursts that could trigger 429 errors.
 - **Bounded Concurrency**: uses a fixed thread-pool HTTP server (`QuietThreadPoolHTTPServer` with 8 worker threads) and an 8-worker payload executor, guaranteeing predictable resource usage and preventing thread exhaustion.
-- **High-Performance In-Memory Cache**: responses are cached as pre-serialized UTF-8 bytes (`cached["bytes"]`), giving cache hits sub-2ms response times with near-zero CPU overhead.
-- **Tiered Cache Windows**:
-  - Device metrics: configurable TTL (default `600s` / 10 minutes, matching Central's internal polling frequency).
-  - Firmware details: 1-hour cache per serial, eliminating hundreds of redundant API calls per sync cycle.
+- **High-Performance In-Memory Cache**: responses across all endpoints (`device`, `site-health`, `client-onboarding-stage`) are cached as pre-serialized UTF-8 bytes (`cached["bytes"]`), giving cache hits sub-2ms response times with near-zero CPU overhead.
+- **Tiered Cache Windows & Batching**:
+  - Device metrics & site health: configurable TTL (default `600s` / 10 minutes, matching Central's internal polling frequency).
+  - Tenant-batched firmware details: fetched once per tenant (up to 1000 devices per call) and cached for 1 hour per serial, reducing 300+ per-device firmware calls down to 1 call per tenant per hour.
+  - Negative 404 cache (12h): optional switch endpoints (`/vsx`, `/lag-summary`, `/hardware-trends`) that return `404` on models without those features are cached in a negative cache for 12 hours, eliminating repeated 404 probes.
   - GreenLake OAuth tokens: kept in memory with disk write-through, eliminating disk I/O on every API call.
-- **Stale-While-Revalidate (SWR) with Jitter**: background refreshes use deterministic ±30s TTL jitter to prevent thundering herd / cache stampedes when monitoring large fleets.
+- **Stale-While-Revalidate (SWR) with Jitter**: background refreshes use deterministic ±30s TTL jitter and single-flight deduplication across all endpoints to prevent thundering herd / cache stampedes when monitoring large fleets.
 - **Template Hash Check**: skips redundant 68 KB Zabbix template imports if the template has not changed, saving Zabbix API overhead.
 
 ## Requirements
@@ -429,8 +430,16 @@ The bundled template contains:
 Device templates use:
 
 - one HTTP agent raw master item (`central.device.raw`) with `history: 0`
-- dependent items for common core metrics across all devices:
+- automatic **Zabbix Host Inventory** (`inventory_mode: Automatic`) populated via dependent items:
+  - Model (`summary.model` → `MODEL`)
+  - Serial Number (`summary.serial` → `SERIALNO_A`)
+  - MAC Address (`summary.mac` → `MACADDRESS_A`)
+  - Firmware Version (`summary.firmware` → `OS`)
+  - Private IP Address (`summary.ip` → `HOST_NETWORKS`)
+  - Site Name (`summary.site_name` → `LOCATION`)
+- dependent items and triggers for common core metrics across all devices:
   - connection status, firmware version, and uptime
+  - automatic restart notification trigger when `uptime < 10m`, displaying the exact `last_reboot_reason` in the alert title
   - CPU and memory utilization
   - private IP address (`summary.ip`) and public IP address (`summary.public_ip`)
   - last reboot reason (`summary.last_reboot_reason`)
@@ -441,12 +450,12 @@ Device templates use:
   - AP radios, physical Ethernet ports, and WLAN client payloads
 - Switch-specific monitoring:
   - system temperature in °C (`summary.temperature`)
-  - PoE budget available (`summary.poe_available`), PoE consumption (`summary.poe_consumption`), and total power consumption (`summary.power_consumption`)
+  - PoE budget available (`summary.poe_available`), PoE consumption (`summary.poe_consumption`) with high utilization alert (`> 85%`), and total power consumption (`summary.power_consumption`)
   - aggregated switch counters: total interfaces, interfaces down, total uplinks, uplinks down, aggregated CRC errors, drop counts, neighbours, and failed transceivers
   - dynamic `Switch uplink discovery` (LLD) extracting speed, duplex, admin/oper status, errors, and LLDP neighbour details for active uplinks
   - full `Switch interface discovery` (LLD) covering all ports (kept disabled by default to maintain low database volume, easily enabled via LLD macros)
   - best-effort stack, LAG, VSX, and hardware health payloads where the tenant/API/model exposes them
-- Gateway-specific monitoring: basic status, firmware, and ports
+- Gateway-specific monitoring: status, firmware, inventory fields, reboot reason, and ports
 
 Site templates use:
 

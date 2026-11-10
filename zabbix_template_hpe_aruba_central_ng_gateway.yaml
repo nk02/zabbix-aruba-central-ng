@@ -21,7 +21,7 @@ zabbix_export:
       value: '7200'
       description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.16
+      value: 2.0.18
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -372,6 +372,7 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.firmware
       value_type: CHAR
+      inventory_link: OS
       preprocessing:
       - type: JSONPATH
         parameters:
@@ -390,6 +391,11 @@ zabbix_export:
         - $.summary.uptime_seconds
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 8f41c09e271a43f9b274019a83476c01
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.device.uptime_ms)>0 and last(/HPE Aruba Central NG - DeviceType AP/central.device.uptime_ms)<600 and (last(/HPE Aruba Central NG - DeviceType AP/central.device.last_reboot_reason)<>"" or last(/HPE Aruba Central NG - DeviceType AP/central.device.last_reboot_reason)="")
+        name: 'AP {HOST.NAME}: has been restarted (reason: {ITEM.LASTVALUE2})'
+        priority: INFO
     - uuid: 92cd47b770da4fd6b7c582f8e93c2143
       name: AP recommended firmware
       type: DEPENDENT
@@ -439,6 +445,7 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.ip
       value_type: CHAR
+      inventory_link: HOST_NETWORKS
       preprocessing:
       - type: JSONPATH
         parameters:
@@ -465,6 +472,54 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.last_reboot_reason
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476a01
+      name: AP model
+      type: DEPENDENT
+      key: central.device.model
+      value_type: CHAR
+      inventory_link: MODEL
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.model
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476a02
+      name: AP serial number
+      type: DEPENDENT
+      key: central.device.serial
+      value_type: CHAR
+      inventory_link: SERIALNO_A
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.serial
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476a03
+      name: AP MAC address
+      type: DEPENDENT
+      key: central.device.mac
+      value_type: CHAR
+      inventory_link: MACADDRESS_A
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.mac
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476a04
+      name: AP site name
+      type: DEPENDENT
+      key: central.device.site_name
+      value_type: CHAR
+      inventory_link: LOCATION
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.site_name
       master_item:
         key: central.device.raw
     - uuid: b550cf82e78e4060a867692e94293f7f
@@ -697,6 +752,7 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.firmware
       value_type: CHAR
+      inventory_link: OS
       preprocessing:
       - type: JSONPATH
         parameters:
@@ -751,6 +807,11 @@ zabbix_export:
         - $.summary.uptime_seconds
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 8f41c09e271a43f9b274019a83476c02
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.uptime_ms)>0 and last(/HPE Aruba Central NG - DeviceType Switch/central.device.uptime_ms)<600 and (last(/HPE Aruba Central NG - DeviceType Switch/central.device.last_reboot_reason)<>"" or last(/HPE Aruba Central NG - DeviceType Switch/central.device.last_reboot_reason)="")
+        name: 'Switch {HOST.NAME}: has been restarted (reason: {ITEM.LASTVALUE2})'
+        priority: INFO
     - uuid: a233bb988b214077a92de9898c95358f
       name: Switch recommended firmware
       type: DEPENDENT
@@ -800,6 +861,7 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.ip
       value_type: CHAR
+      inventory_link: HOST_NETWORKS
       preprocessing:
       - type: JSONPATH
         parameters:
@@ -826,6 +888,54 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.last_reboot_reason
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476b01
+      name: Switch model
+      type: DEPENDENT
+      key: central.device.model
+      value_type: CHAR
+      inventory_link: MODEL
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.model
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476b02
+      name: Switch serial number
+      type: DEPENDENT
+      key: central.device.serial
+      value_type: CHAR
+      inventory_link: SERIALNO_A
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.serial
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476b03
+      name: Switch MAC address
+      type: DEPENDENT
+      key: central.device.mac
+      value_type: CHAR
+      inventory_link: MACADDRESS_A
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.mac
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476b04
+      name: Switch site name
+      type: DEPENDENT
+      key: central.device.site_name
+      value_type: CHAR
+      inventory_link: LOCATION
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.site_name
       master_item:
         key: central.device.raw
     - uuid: 366d0904e7c941ee8ee43b471a833e3d
@@ -858,6 +968,11 @@ zabbix_export:
         - $.summary.poe_consumption
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 8f41c09e271a43f9b274019a83476c04
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.poe_available)>0 and last(/HPE Aruba Central NG - DeviceType Switch/central.switch.poe_consumption)>0 and (last(/HPE Aruba Central NG - DeviceType Switch/central.switch.poe_consumption)/last(/HPE Aruba Central NG - DeviceType Switch/central.switch.poe_available))*100>85
+        name: 'Switch {HOST.NAME}: high PoE power utilization (> 85%)'
+        priority: WARNING
     - uuid: 285fb8086cef4303b41cd81b2cf22b51
       name: Switch PoE power available
       type: DEPENDENT
@@ -1794,6 +1909,7 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.firmware
       value_type: CHAR
+      inventory_link: OS
       preprocessing:
       - type: JSONPATH
         parameters:
@@ -1812,6 +1928,11 @@ zabbix_export:
         - $.summary.uptime_seconds
       master_item:
         key: central.device.raw
+      triggers:
+      - uuid: 8f41c09e271a43f9b274019a83476c03
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.uptime_ms)>0 and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.uptime_ms)<600 and (last(/HPE Aruba Central NG - DeviceType Gateway/central.device.last_reboot_reason)<>"" or last(/HPE Aruba Central NG - DeviceType Gateway/central.device.last_reboot_reason)="")
+        name: 'Gateway {HOST.NAME}: has been restarted (reason: {ITEM.LASTVALUE2})'
+        priority: INFO
     - uuid: 22a4e4fe2c5542ea8c8ae9ca8fa70a2f
       name: Gateway CPU utilization
       type: DEPENDENT
@@ -1897,6 +2018,7 @@ zabbix_export:
       type: DEPENDENT
       key: central.device.ip
       value_type: CHAR
+      inventory_link: HOST_NETWORKS
       preprocessing:
       - type: JSONPATH
         parameters:
@@ -1912,6 +2034,65 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.public_ip
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476d00
+      name: Gateway last reboot reason
+      type: DEPENDENT
+      key: central.device.last_reboot_reason
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.last_reboot_reason
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476d01
+      name: Gateway model
+      type: DEPENDENT
+      key: central.device.model
+      value_type: CHAR
+      inventory_link: MODEL
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.model
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476d02
+      name: Gateway serial number
+      type: DEPENDENT
+      key: central.device.serial
+      value_type: CHAR
+      inventory_link: SERIALNO_A
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.serial
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476d03
+      name: Gateway MAC address
+      type: DEPENDENT
+      key: central.device.mac
+      value_type: CHAR
+      inventory_link: MACADDRESS_A
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.mac
+      master_item:
+        key: central.device.raw
+    - uuid: 8f41c09e271a43f9b274019a83476d04
+      name: Gateway site name
+      type: DEPENDENT
+      key: central.device.site_name
+      value_type: CHAR
+      inventory_link: LOCATION
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.site_name
       master_item:
         key: central.device.raw
     - uuid: 3aa4827f6cf54e64b6d561c7835f610e
