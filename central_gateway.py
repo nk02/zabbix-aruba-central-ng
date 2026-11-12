@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.24"
+APP_VERSION = "2.0.25"
 CONFIG_SCHEMA_VERSION = "2.0.0"
 TEMPLATE_VERSION = "2.0.18"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
@@ -3160,6 +3160,18 @@ def run_combined(config: dict[str, Any]) -> None:
         time.sleep(sync_interval)
 
 
+def raise_nofile_limit(target: int = 65536) -> None:
+    try:
+        import resource  # POSIX only
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        desired = min(target, hard) if hard > 0 else target
+        if soft < desired:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (desired, hard))
+            LOGGER.info(f"Raised RLIMIT_NOFILE soft limit from {soft} to {desired} (hard={hard})")
+    except Exception:
+        pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="HPE Aruba Central NG gateway/sync for Zabbix")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -3176,6 +3188,7 @@ def main() -> int:
     try:
         config = load_json_config()
         configure_logging(config)
+        raise_nofile_limit()
         init_http_cache()
         if args.command == "config-check":
             print(json.dumps(config_check(config), ensure_ascii=True))
