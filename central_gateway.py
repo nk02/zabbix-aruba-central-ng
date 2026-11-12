@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.23"
+APP_VERSION = "2.0.24"
 CONFIG_SCHEMA_VERSION = "2.0.0"
 TEMPLATE_VERSION = "2.0.18"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
@@ -51,6 +51,8 @@ IN_FLIGHT_LOCK = threading.Lock()
 IN_FLIGHT_REQUESTS: dict[str, threading.Event] = {}
 PAYLOAD_EXECUTOR_LOCK = threading.Lock()
 PAYLOAD_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
+BACKGROUND_EXECUTOR_LOCK = threading.Lock()
+BACKGROUND_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
 TOKEN_CACHE_LOCK = threading.Lock()
 TOKEN_CACHE_MEM: dict[str, Any] | None = None
 GATEWAY_STATE_LOCK = threading.Lock()
@@ -92,6 +94,17 @@ def get_payload_executor(max_workers: int = 8) -> concurrent.futures.ThreadPoolE
                 thread_name_prefix="CentralWorker",
             )
         return PAYLOAD_EXECUTOR
+
+
+def get_background_executor(max_workers: int = 4) -> concurrent.futures.ThreadPoolExecutor:
+    global BACKGROUND_EXECUTOR
+    with BACKGROUND_EXECUTOR_LOCK:
+        if BACKGROUND_EXECUTOR is None:
+            BACKGROUND_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="SwrWorker",
+            )
+        return BACKGROUND_EXECUTOR
 
 
 LOGGER = logging.getLogger("aruba_gateway")
@@ -735,7 +748,10 @@ def get_all_pages(
     results: list[dict[str, Any]] = []
     use_next_cursor = path.startswith("/network-monitoring/")
     next_cursor: Any = None
-    while True:
+    seen_cursors: set[str] = set()
+    page_count = 0
+    while page_count < 100:
+        page_count += 1
         params: dict[str, Any] = {"limit": limit}
         if query:
             params.update(query)
@@ -767,6 +783,11 @@ def get_all_pages(
             next_cursor = data.get("next")
             if not records or not next_cursor or len(results) >= total:
                 break
+            cursor_str = str(next_cursor)
+            if cursor_str in seen_cursors:
+                LOGGER.warning(f"Cyclic pagination cursor detected on {path}; stopping")
+                break
+            seen_cursors.add(cursor_str)
         else:
             offset += len(records)
             if not records or offset >= total:
@@ -2676,7 +2697,7 @@ def trigger_background_device_fetch(config: dict[str, Any], key: str, device: di
             return
         event = threading.Event()
         IN_FLIGHT_REQUESTS[key] = event
-    executor = get_payload_executor()
+    executor = get_background_executor()
     executor.submit(_background_device_fetch_worker, config, key, device, cache_key, event)
 
 
@@ -2785,7 +2806,7 @@ def trigger_background_site_health_fetch(config: dict[str, Any], workspace: dict
             return
         event = threading.Event()
         IN_FLIGHT_REQUESTS[flight_key] = event
-    executor = get_payload_executor()
+    executor = get_background_executor()
     executor.submit(_background_site_health_worker, config, workspace, tenant, site_id, cache_key, flight_key, event)
 
 
@@ -2886,7 +2907,7 @@ def trigger_background_client_onboarding_fetch(
             return
         event = threading.Event()
         IN_FLIGHT_REQUESTS[flight_key] = event
-    executor = get_payload_executor()
+    executor = get_background_executor()
     executor.submit(_background_client_onboarding_worker, config, workspace, tenant, site_id, field, window_ms, cache_key, flight_key, event)
 
 
