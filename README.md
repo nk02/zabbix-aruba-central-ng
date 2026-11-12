@@ -550,6 +550,7 @@ WorkingDirectory=/opt/hpe-central-zabbix
 ExecStart=/usr/bin/python3 /opt/hpe-central-zabbix/central_gateway.py run
 Restart=always
 RestartSec=10
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

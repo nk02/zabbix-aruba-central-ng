@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.22"
+APP_VERSION = "2.0.23"
 CONFIG_SCHEMA_VERSION = "2.0.0"
 TEMPLATE_VERSION = "2.0.18"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
@@ -493,9 +493,12 @@ def request_json(
                 body = response.read().decode("utf-8")
                 return json.loads(body) if body else {}
         except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            if exc.code == 429 and attempt < attempts:
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
                 retry_after = exc.headers.get("Retry-After")
+            finally:
+                exc.close()
+            if exc.code == 429 and attempt < attempts:
                 try:
                     delay = float(retry_after) if retry_after else 0.0
                 except (TypeError, ValueError):
@@ -1234,7 +1237,10 @@ def zabbix_api_call(config: dict[str, Any], method: str, params: dict[str, Any] 
                 result = json.loads(body) if body else {}
                 break
         except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
+            try:
+                body = exc.read().decode("utf-8", errors="replace")
+            finally:
+                exc.close()
             if exc.code in {502, 503, 504} and attempt < attempts:
                 time.sleep(min(2 ** attempt, 10))
                 continue
@@ -3016,6 +3022,19 @@ class QuietThreadPoolHTTPServer(HTTPServer):
             max_workers=max_workers,
             thread_name_prefix="HttpWorker",
         )
+        self._last_accept_error_log = 0.0
+
+    def get_request(self) -> tuple[Any, Any]:
+        try:
+            return super().get_request()
+        except OSError as exc:
+            # Avoid 100% CPU busy-loop in serve_forever() if FD limit (EMFILE/ENFILE) is reached
+            now = time.monotonic()
+            if now - self._last_accept_error_log >= 30.0:
+                self._last_accept_error_log = now
+                LOGGER.warning(f"HTTP accept error (sleeping 0.2s): {exc}")
+            time.sleep(0.2)
+            raise
 
     def process_request(self, request: Any, client_address: Any) -> None:
         self.executor.submit(self._dispatch_request, request, client_address)
@@ -3044,6 +3063,7 @@ class QuietThreadPoolHTTPServer(HTTPServer):
 
 class GatewayHandler(BaseHTTPRequestHandler):
     config: dict[str, Any] = {}
+    timeout = 30
 
     def write_json(self, status: int, body: Any) -> None:
         if isinstance(body, bytes):
