@@ -21,7 +21,7 @@ zabbix_export:
       value: '7200'
       description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.18
+      value: 2.0.19
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -243,6 +243,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.data.health.groups[?(@.name=="Good")].value.first()
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.site.health.raw
     - uuid: dc4b6ab192ff4afca17323788f4de670
@@ -255,6 +256,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.data.health.groups[?(@.name=="Fair")].value.first()
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.site.health.raw
     - uuid: 395097270ec44a3fb9ee5120d51b888b
@@ -267,6 +269,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.data.health.groups[?(@.name=="Poor")].value.first()
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.site.health.raw
       triggers:
@@ -298,7 +301,8 @@ zabbix_export:
       preprocessing:
       - type: JSONPATH
         parameters:
-        - $.data.count
+        - $.summary.failed_count
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.site.client_onboarding.raw
       triggers:
@@ -389,6 +393,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.uptime_seconds
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -571,6 +576,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.client_count
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
     - uuid: d0b6f78ba4e74559b05c348f9ca3f5fe
@@ -662,6 +668,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.cpu_utilization
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -680,6 +687,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.memory_utilization
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -769,6 +777,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.cpu_utilization
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -787,6 +796,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.memory_utilization
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -805,6 +815,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.uptime_seconds
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -948,6 +959,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.temperature
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -966,6 +978,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.poe_consumption
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -983,6 +996,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.poe_available
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
     - uuid: d0bd7a9e58334c389145d73a6c10b5bf
@@ -995,6 +1009,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.power_consumption
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
     - uuid: 8d6d76c6b7c0432d9534d97a6620ed2c
@@ -1128,7 +1143,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 3b083c5db9654e7f8c88bb86da3d6d22
-        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"IN_SYNC"
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"" and last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"IN_SYNC" and last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"Synchronized" and last(/HPE Aruba Central NG - DeviceType Switch/central.device.config_status)<>"SYNCHRONIZED"
         name: 'Switch {HOST.NAME}: config status is not in sync'
         priority: INFO
         status: DISABLED
@@ -1207,6 +1222,7 @@ zabbix_export:
         - type: JSONPATH
           parameters:
           - '$.uplinks[?(@.id == "{#UPLINK_ID}")].speed_mbps.first()'
+          error_handler: DISCARD_VALUE
         master_item:
           key: central.device.raw
         tags:
@@ -1702,6 +1718,7 @@ zabbix_export:
         - type: JSONPATH
           parameters:
           - '$.data.interfaces[?(@.id == "{#IF_ID}")].speedMbps.first()'
+          error_handler: DISCARD_VALUE
         master_item:
           key: central.device.raw
         tags:
@@ -1888,6 +1905,17 @@ zabbix_export:
       tags:
       - tag: component
         value: gateway
+    - uuid: 8f41c09e271a43f9b274019a83476d05
+      name: Gateway device gateway status
+      type: DEPENDENT
+      key: central.device.gateway_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.gateway.status
+      master_item:
+        key: central.device.raw
     - uuid: 0012de0bbb08426d84f125b3f82aac59
       name: Gateway device status
       type: DEPENDENT
@@ -1926,6 +1954,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.uptime_seconds
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -1943,6 +1972,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.cpu_utilization
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:
@@ -1961,6 +1991,7 @@ zabbix_export:
       - type: JSONPATH
         parameters:
         - $.summary.memory_utilization
+        error_handler: DISCARD_VALUE
       master_item:
         key: central.device.raw
       triggers:

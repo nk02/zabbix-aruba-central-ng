@@ -20,14 +20,15 @@ The gateway keeps all Aruba API calls behind one rate limiter and provides produ
 
 - **Smooth Rate Limiting**: requests are smoothly paced (125 ms apart for default `8` calls/s) to avoid bursts that could trigger 429 errors.
 - **Bounded Concurrency**: uses a fixed thread-pool HTTP server (`QuietThreadPoolHTTPServer` with 8 worker threads) and an 8-worker payload executor, guaranteeing predictable resource usage and preventing thread exhaustion.
-- **High-Performance In-Memory Cache**: responses across all endpoints (`device`, `site-health`, `client-onboarding-stage`) are cached as pre-serialized UTF-8 bytes (`cached["bytes"]`), giving cache hits sub-2ms response times with near-zero CPU overhead.
+- **HTTP/1.1 Keep-Alive & TLS Reuse**: reuses pooled HTTPS connections and cached `SSLContext` instances across Aruba Central, GreenLake, and Zabbix API calls, avoiding repeated TCP/TLS handshakes and ephemeral port churn.
+- **High-Performance In-Memory Cache**: responses across all endpoints (`device`, `site-health`, `client-onboarding-stage`) are cached as pre-serialized UTF-8 bytes (`cached["bytes"]`), giving cache hits sub-2ms response times with near-zero CPU overhead, with graceful disk flush on `SIGTERM`/`SIGINT`.
 - **Tiered Cache Windows & Batching**:
-  - Device metrics & site health: configurable TTL (default `600s` / 10 minutes, matching Central's internal polling frequency).
-  - Tenant-batched firmware details: fetched once per tenant (up to 1000 devices per call) and cached for 1 hour per serial, reducing 300+ per-device firmware calls down to 1 call per tenant per hour.
+  - Device metrics & site health: configurable TTL (default `600s` / 10 minutes, matching Central's internal polling frequency). AP collection extracts radios, ports, and WLANs from a single `/network-monitoring/v1/aps/{serial}` call.
+  - Tenant-batched firmware details: fetched once per tenant (up to 1000 devices per call) under a per-tenant lock and cached for 1 hour per serial, reducing 300+ per-device firmware calls down to 1 call per tenant per hour.
   - Negative 404 cache (12h): optional switch endpoints (`/vsx`, `/lag-summary`, `/hardware-trends`) that return `404` on models without those features are cached in a negative cache for 12 hours, eliminating repeated 404 probes.
   - GreenLake OAuth tokens: kept in memory with disk write-through, eliminating disk I/O on every API call.
-- **Stale-While-Revalidate (SWR) with Jitter**: background refreshes use deterministic ±30s TTL jitter and single-flight deduplication across all endpoints to prevent thundering herd / cache stampedes when monitoring large fleets.
-- **Template Hash Check**: skips redundant 68 KB Zabbix template imports if the template has not changed, saving Zabbix API overhead.
+- **Stale-While-Revalidate (SWR) with Jitter**: background refreshes use deterministic ±10% TTL jitter and single-flight deduplication across all endpoints to prevent thundering herd / cache stampedes, while preserving valid cached data across transient upstream 5xx errors.
+- **Template Hash Check**: persists the rendered template SHA-256 hash in `gateway_state.json` and skips redundant Zabbix template imports across sync cycles and service restarts when unchanged.
 
 ## Requirements
 

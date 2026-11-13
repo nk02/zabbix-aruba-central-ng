@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from collections import deque
 import concurrent.futures
 import json
 import logging
@@ -8,6 +9,7 @@ import http.client
 import io
 import os
 import re
+import signal
 import ssl
 import sys
 import threading
@@ -22,9 +24,9 @@ from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 
-APP_VERSION = "2.0.25"
+APP_VERSION = "2.0.26"
 CONFIG_SCHEMA_VERSION = "2.0.0"
-TEMPLATE_VERSION = "2.0.18"
+TEMPLATE_VERSION = "2.0.19"
 GITHUB_RAW_BASE_URL = "https://raw.githubusercontent.com/nk02/zabbix-aruba-central-ng"
 DEFAULT_TEMPLATE_GROUP = "Templates/Network devices"
 GREENLAKE_API = "https://global.api.greenlake.hpe.com"
@@ -61,14 +63,21 @@ GATEWAY_STATE_MTIME_NS: int | None = None
 GATEWAY_STATE_LAST_STAT = 0.0
 PACKAGE_VERSION_LOCK = threading.Lock()
 PACKAGE_VERSION_CACHE: dict[str, dict[str, Any]] = {}
+PACKAGE_VERSION_REFRESHING: set[str] = set()
 LAST_IMPORTED_TEMPLATE_HASH: str | None = None
 FIRMWARE_CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
 TENANT_FIRMWARE_CACHE: dict[str, int] = {}
+TENANT_FIRMWARE_LOCKS: dict[str, threading.Lock] = {}
 FIRMWARE_CACHE_LOCK = threading.Lock()
 OPTIONAL_404_CACHE: dict[str, int] = {}
 ALT_PATH_CACHE: dict[str, str] = {}
 OPTIONAL_404_LOCK = threading.Lock()
 OPTIONAL_404_TTL_SECONDS = 43200
+HTTP_POOL_LOCK = threading.Lock()
+HTTP_CONN_POOL: dict[tuple[str, str, int, bool, str], deque[tuple[float, http.client.HTTPConnection]]] = {}
+SSL_CONTEXT_CACHE: dict[tuple[bool, str], ssl.SSLContext] = {}
+HTTP_POOL_MAX_PER_ORIGIN = 12
+HTTP_POOL_IDLE_TIMEOUT = 45.0
 
 
 def get_cached_firmware(serial: str) -> dict[str, Any] | None:
@@ -190,26 +199,134 @@ def save_http_cache(cache: dict[str, Any]) -> None:
         LOGGER.warning(f"Could not save persistent HTTP cache: {exc}")
 
 
+OPTIONAL_NUMERIC_SUMMARY_KEYS = {
+    "uptime_in_millis",
+    "uptime_seconds",
+    "cpu_utilization",
+    "memory_utilization",
+    "temperature",
+    "poe_consumption",
+    "poe_available",
+    "power_consumption",
+    "client_count",
+}
+
+
+def summarize_client_onboarding(data: Any) -> dict[str, Any]:
+    total = 0
+    by_stage: dict[str, int] = {}
+    if isinstance(data, dict):
+        items = data.get("items")
+        if isinstance(items, list):
+            for stage_item in items:
+                if not isinstance(stage_item, dict):
+                    continue
+                stage_name = str(stage_item.get("type") or stage_item.get("stage") or "").strip().lower()
+                stage_sum = 0
+                entries = stage_item.get("data")
+                if isinstance(entries, list):
+                    for entry in entries:
+                        if isinstance(entry, dict):
+                            try:
+                                stage_sum += int(float(entry.get("count") or 0))
+                            except (TypeError, ValueError):
+                                pass
+                elif stage_item.get("count") not in (None, ""):
+                    try:
+                        stage_sum += int(float(stage_item["count"]))
+                    except (TypeError, ValueError):
+                        pass
+                if stage_name:
+                    by_stage[stage_name] = by_stage.get(stage_name, 0) + stage_sum
+                total += stage_sum
+    return {"failed_count": total, "by_stage": by_stage}
+
+
+def _sanitize_cached_entry(key: str, body: dict[str, Any]) -> bool:
+    if key.startswith("device:"):
+        data_block = body.get("data")
+        if isinstance(data_block, dict):
+            errs = data_block.get("errors")
+            details = data_block.get("details")
+            if isinstance(errs, dict) and errs.get("details") and not details and not is_not_found_error(str(errs.get("details"))):
+                return False
+            for u in data_block.get("uplinks") or []:
+                if isinstance(u, dict):
+                    if u.get("speed_mbps") is None:
+                        u.pop("speed_mbps", None)
+                    for uk in list(u.keys()):
+                        if u[uk] is None:
+                            u[uk] = ""
+            for iface in data_block.get("interfaces") or []:
+                if isinstance(iface, dict):
+                    if iface.get("speedMbps") is None:
+                        iface.pop("speedMbps", None)
+                    for nk in ("crc", "drop", "errors"):
+                        if iface.get(nk) is None:
+                            iface[nk] = 0
+                    for ik in list(iface.keys()):
+                        if iface[ik] is None:
+                            iface[ik] = ""
+        summary = body.get("summary")
+        if isinstance(summary, dict):
+            if summary.get("kind") == "ap" and summary.get("client_count") is None:
+                summary["client_count"] = 0
+            for s_key in list(summary.keys()):
+                if summary[s_key] is None:
+                    if s_key in OPTIONAL_NUMERIC_SUMMARY_KEYS:
+                        summary.pop(s_key, None)
+                    else:
+                        summary[s_key] = ""
+        for u in body.get("uplinks") or []:
+            if isinstance(u, dict):
+                if u.get("speed_mbps") is None:
+                    u.pop("speed_mbps", None)
+                for uk in list(u.keys()):
+                    if u[uk] is None:
+                        u[uk] = ""
+    elif key.startswith("client-onboarding:"):
+        if not isinstance(body.get("summary"), dict):
+            body["summary"] = summarize_client_onboarding(body.get("data"))
+    return True
+
+
+def _prune_secondary_caches(now: int) -> None:
+    with FIRMWARE_CACHE_LOCK:
+        expired_fw = [k for k, v in FIRMWARE_CACHE.items() if now - v[0] >= 3600]
+        for k in expired_fw:
+            FIRMWARE_CACHE.pop(k, None)
+    with OPTIONAL_404_LOCK:
+        expired_404 = [k for k, ts in OPTIONAL_404_CACHE.items() if now - ts >= OPTIONAL_404_TTL_SECONDS]
+        for k in expired_404:
+            OPTIONAL_404_CACHE.pop(k, None)
+
+
 def init_http_cache() -> None:
     global HTTP_CACHE
     with HTTP_CACHE_LOCK:
-        HTTP_CACHE = load_http_cache()
-        for v in HTTP_CACHE.values():
-            if isinstance(v, dict) and "body" in v and "bytes" not in v:
-                try:
-                    v["bytes"] = json.dumps(v["body"], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
-                except Exception:
-                    pass
+        loaded = load_http_cache()
+        cleaned: dict[str, dict[str, Any]] = {}
+        for k, v in loaded.items():
+            if not isinstance(v, dict) or not isinstance(v.get("body"), dict):
+                continue
+            if not _sanitize_cached_entry(k, v["body"]):
+                continue
+            try:
+                v["bytes"] = json.dumps(v["body"], ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+            except Exception:
+                pass
+            cleaned[k] = v
+        HTTP_CACHE = cleaned
 
 
 def flush_http_cache() -> None:
     global HTTP_CACHE_DIRTY, HTTP_CACHE_LAST_SAVED
+    now = utc_now()
     with HTTP_CACHE_LOCK:
         if not HTTP_CACHE_DIRTY:
             return
         HTTP_CACHE_DIRTY = False
         HTTP_CACHE_LAST_SAVED = time.monotonic()
-        now = utc_now()
         stale_keys = [
             k for k, v in HTTP_CACHE.items()
             if not isinstance(v, dict) or now - int(v.get("fetched_at") or 0) > HTTP_CACHE_MAX_AGE_SECONDS
@@ -222,6 +339,7 @@ def flush_http_cache() -> None:
             if isinstance(v, dict) and "body" in v
         }
     save_http_cache(snapshot)
+    _prune_secondary_caches(now)
 
 
 def flush_http_cache_on_exit() -> None:
@@ -471,6 +589,115 @@ def throttle_central(config: dict[str, Any]) -> None:
         time.sleep(sleep_for)
 
 
+def _has_proxy_env() -> bool:
+    return any(os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"))
+
+
+def _get_ssl_context(verify: bool = True, ca_file: str = "") -> ssl.SSLContext:
+    key = (verify, ca_file)
+    with HTTP_POOL_LOCK:
+        ctx = SSL_CONTEXT_CACHE.get(key)
+        if ctx is not None:
+            return ctx
+    ctx = ssl.create_default_context(cafile=ca_file or None) if verify else ssl._create_unverified_context()
+    with HTTP_POOL_LOCK:
+        SSL_CONTEXT_CACHE[key] = ctx
+    return ctx
+
+
+def _pooled_http_request(
+    method: str,
+    full_url: str,
+    headers: dict[str, str],
+    body: bytes | None = None,
+    timeout: int = 60,
+    tls_verify: bool = True,
+    ca_file: str = "",
+) -> tuple[int, dict[str, str], bytes]:
+    if _has_proxy_env():
+        ctx = _get_ssl_context(tls_verify, ca_file) if full_url.lower().startswith("https://") else None
+        req = Request(full_url, data=body, headers=headers, method=method)
+        try:
+            with urlopen(req, timeout=timeout, context=ctx) as resp:
+                raw = resp.read()
+                resp_headers = {k.lower(): v for k, v in resp.headers.items()}
+                return resp.status, resp_headers, raw
+        except HTTPError as exc:
+            try:
+                raw = exc.read()
+                resp_headers = {k.lower(): v for k, v in exc.headers.items()} if exc.headers else {}
+                return exc.code, resp_headers, raw
+            finally:
+                exc.close()
+
+    parsed = urlparse(full_url)
+    scheme = (parsed.scheme or "https").lower()
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if scheme == "https" else 80)
+    target = parsed.path or "/"
+    if parsed.query:
+        target = f"{target}?{parsed.query}"
+    pool_key = (scheme, host, port, tls_verify, ca_file)
+    req_headers = dict(headers)
+    req_headers.setdefault("Connection", "keep-alive")
+
+    for reuse_attempt in range(2):
+        conn: http.client.HTTPConnection | None = None
+        reused = False
+        now = time.monotonic()
+        with HTTP_POOL_LOCK:
+            bucket = HTTP_CONN_POOL.get(pool_key)
+            while bucket:
+                last_used, candidate = bucket.pop()
+                if now - last_used <= HTTP_POOL_IDLE_TIMEOUT:
+                    conn = candidate
+                    reused = True
+                    break
+                try:
+                    candidate.close()
+                except Exception:
+                    pass
+        if conn is None:
+            if scheme == "https":
+                conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=_get_ssl_context(tls_verify, ca_file))
+            else:
+                conn = http.client.HTTPConnection(host, port, timeout=timeout)
+        else:
+            conn.timeout = timeout
+
+        try:
+            conn.request(method, target, body=body, headers=req_headers)
+            resp = conn.getresponse()
+            raw = resp.read()
+            status = resp.status
+            resp_headers = {k.lower(): v for k, v in resp.getheaders()}
+            if "close" in resp_headers.get("connection", "").lower() or resp.will_close:
+                conn.close()
+            else:
+                with HTTP_POOL_LOCK:
+                    bucket = HTTP_CONN_POOL.setdefault(pool_key, deque())
+                    if len(bucket) < HTTP_POOL_MAX_PER_ORIGIN:
+                        bucket.append((time.monotonic(), conn))
+                    else:
+                        conn.close()
+            return status, resp_headers, raw
+        except (http.client.RemoteDisconnected, http.client.BadStatusLine, ConnectionResetError, BrokenPipeError):
+            try:
+                conn.close()
+            except Exception:
+                pass
+            if reused and reuse_attempt == 0:
+                continue
+            raise
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            raise
+    raise URLError(f"Connection failed for {full_url}")
+
+
 def request_json(
     method: str,
     url: str,
@@ -499,26 +726,24 @@ def request_json(
     for attempt in range(1, max(1, attempts) + 1):
         if throttle and "arubanetworks.com" in full_url:
             throttle_central(config)
-        req = Request(full_url, data=data, headers=headers, method=method)
         try:
             LOGGER.debug(f"Calling Central API: {method} {full_url} (attempt {attempt}/{attempts})")
-            with urlopen(req, timeout=60) as response:
-                body = response.read().decode("utf-8")
-                return json.loads(body) if body else {}
-        except HTTPError as exc:
-            try:
-                body = exc.read().decode("utf-8", errors="replace")
-                retry_after = exc.headers.get("Retry-After")
-            finally:
-                exc.close()
-            if exc.code == 429 and attempt < attempts:
-                try:
-                    delay = float(retry_after) if retry_after else 0.0
-                except (TypeError, ValueError):
-                    delay = 0.0
-                time.sleep(max(delay, min(2 ** attempt, 10)))
-                continue
-            raise CentralError(f"HTTP {exc.code} calling {full_url}: {body}") from exc
+            status, resp_headers, raw = _pooled_http_request(method, full_url, headers=headers, body=data, timeout=60)
+            if status >= 400:
+                body_text = raw.decode("utf-8", errors="replace")
+                if status in {429, 502, 503, 504} and attempt < attempts:
+                    retry_after = resp_headers.get("retry-after")
+                    try:
+                        delay = float(retry_after) if retry_after else 0.0
+                    except (TypeError, ValueError):
+                        delay = 0.0
+                    time.sleep(max(delay, min(2 ** attempt, 10)))
+                    continue
+                raise CentralError(f"HTTP {status} calling {full_url}: {body_text}")
+            body_text = raw.decode("utf-8")
+            return json.loads(body_text) if body_text else {}
+        except CentralError:
+            raise
         except Exception as exc:
             if attempt < attempts:
                 time.sleep(min(2 ** attempt, 10))
@@ -528,8 +753,9 @@ def request_json(
 
 
 def request_text(url: str, timeout: int = 5) -> str:
+    ctx = _get_ssl_context(True, "") if url.lower().startswith("https://") else None
     req = Request(url, headers={"Accept": "text/plain"}, method="GET")
-    with urlopen(req, timeout=timeout) as response:
+    with urlopen(req, timeout=timeout, context=ctx) as response:
         return response.read().decode("utf-8")
 
 
@@ -559,6 +785,37 @@ def version_component(name: str, current: str, latest: str | None, error: str | 
     return {"name": name, "current": current, "latest": latest, "status": status}
 
 
+def _refresh_package_version_cache(base: str, ref: str, ttl: int, cache_key: str) -> dict[str, Any]:
+    try:
+        result: dict[str, Any] = {"status": "current"}
+        try:
+            latest_app = extract_python_constant(request_text(f"{base}/{ref}/central_gateway.py"), "APP_VERSION")
+            result["app"] = version_component("gateway", APP_VERSION, latest_app)
+        except Exception as exc:
+            result["app"] = version_component("gateway", APP_VERSION, None, str(exc))
+        try:
+            latest_template = extract_template_version(request_text(f"{base}/{ref}/zabbix_template_hpe_aruba_central_ng_gateway.yaml"))
+            result["template"] = version_component("template", TEMPLATE_VERSION, latest_template)
+        except Exception as exc:
+            result["template"] = version_component("template", TEMPLATE_VERSION, None, str(exc))
+        components = (result["app"], result["template"])
+        if any(component["status"] == "outdated" for component in components):
+            result["status"] = "outdated"
+        elif any(component["status"] == "unknown" for component in components):
+            result["status"] = "unknown"
+
+        effective_ttl = min(max(60, ttl), 300) if result["status"] == "unknown" else max(60, ttl)
+        with PACKAGE_VERSION_LOCK:
+            PACKAGE_VERSION_CACHE[cache_key] = {
+                "expires_at": utc_now() + effective_ttl,
+                "value": result,
+            }
+        return dict(result)
+    finally:
+        with PACKAGE_VERSION_LOCK:
+            PACKAGE_VERSION_REFRESHING.discard(cache_key)
+
+
 def package_version_status(config: dict[str, Any]) -> dict[str, Any]:
     gateway = config_section(config, "gateway")
     if gateway.get("version_check_enabled") is False:
@@ -572,35 +829,28 @@ def package_version_status(config: dict[str, Any]) -> dict[str, Any]:
     ttl = int(gateway.get("version_check_ttl_seconds") or 3600)
     cache_key = f"{base}:{ref}:{APP_VERSION}:{TEMPLATE_VERSION}"
     now = utc_now()
+    stale_value: dict[str, Any] | None = None
+    should_refresh = False
     with PACKAGE_VERSION_LOCK:
         cached = PACKAGE_VERSION_CACHE.get(cache_key)
-        if isinstance(cached, dict) and now < int(cached.get("expires_at") or 0):
-            return dict(cached["value"])
+        if isinstance(cached, dict):
+            if now < int(cached.get("expires_at") or 0):
+                return dict(cached["value"])
+            stale_value = dict(cached["value"])
+        if cache_key not in PACKAGE_VERSION_REFRESHING:
+            PACKAGE_VERSION_REFRESHING.add(cache_key)
+            should_refresh = True
 
-    result: dict[str, Any] = {"status": "current"}
-    try:
-        latest_app = extract_python_constant(request_text(f"{base}/{ref}/central_gateway.py"), "APP_VERSION")
-        result["app"] = version_component("gateway", APP_VERSION, latest_app)
-    except Exception as exc:
-        result["app"] = version_component("gateway", APP_VERSION, None, str(exc))
-    try:
-        latest_template = extract_template_version(request_text(f"{base}/{ref}/zabbix_template_hpe_aruba_central_ng_gateway.yaml"))
-        result["template"] = version_component("template", TEMPLATE_VERSION, latest_template)
-    except Exception as exc:
-        result["template"] = version_component("template", TEMPLATE_VERSION, None, str(exc))
-    components = (result["app"], result["template"])
-    if any(component["status"] == "outdated" for component in components):
-        result["status"] = "outdated"
-    elif any(component["status"] == "unknown" for component in components):
-        result["status"] = "unknown"
+    if should_refresh:
+        get_background_executor().submit(_refresh_package_version_cache, base, ref, ttl, cache_key)
 
-    effective_ttl = min(max(60, ttl), 300) if result["status"] == "unknown" else max(60, ttl)
-    with PACKAGE_VERSION_LOCK:
-        PACKAGE_VERSION_CACHE[cache_key] = {
-            "expires_at": utc_now() + effective_ttl,
-            "value": result,
-        }
-    return dict(result)
+    if stale_value is not None:
+        return stale_value
+    return {
+        "status": "unknown",
+        "app": version_component("gateway", APP_VERSION, None),
+        "template": version_component("template", TEMPLATE_VERSION, None),
+    }
 
 
 def workspace_token(config: dict[str, Any], workspace: dict[str, Any], force_refresh: bool = False) -> str:
@@ -696,6 +946,22 @@ def alternate_paths(path: str) -> list[str]:
     return alts
 
 
+def is_device_offline_error(err: str | None) -> bool:
+    if not err:
+        return False
+    lowered = err.lower()
+    return (
+        "device is offline" in lowered
+        or "ap is offline" in lowered
+        or "switch is offline" in lowered
+        or "gateway is offline" in lowered
+    )
+
+
+def is_optional_feature_path(path: str) -> bool:
+    return any(seg in path for seg in ("/vsx", "/lag-summary", "/lag", "/hardware-trends", "/stack/", "/stacks/"))
+
+
 def central_get_optional(
     config: dict[str, Any],
     workspace: dict[str, Any],
@@ -704,10 +970,11 @@ def central_get_optional(
     query: dict[str, str | int] | None = None,
 ) -> tuple[dict[str, Any] | list[dict[str, Any]] | None, str | None]:
     cache_key = f"{tenant.get('tenant_id')}:{path}" if query is None else ""
+    allow_neg_cache = bool(cache_key) and is_optional_feature_path(path)
     if cache_key:
         now = utc_now()
         with OPTIONAL_404_LOCK:
-            ts = OPTIONAL_404_CACHE.get(cache_key)
+            ts = OPTIONAL_404_CACHE.get(cache_key) if allow_neg_cache else None
             if ts is not None and now - ts < OPTIONAL_404_TTL_SECONDS:
                 return None, "HTTP 404 Route Not Found (cached)"
             alt_cached = ALT_PATH_CACHE.get(cache_key)
@@ -720,7 +987,8 @@ def central_get_optional(
     try:
         return central_get(config, workspace, tenant, path, query), None
     except CentralError as exc:
-        if is_not_found_error(str(exc)):
+        err_str = str(exc)
+        if is_not_found_error(err_str) and not is_device_offline_error(err_str):
             for alt in alternate_paths(path):
                 try:
                     res = central_get(config, workspace, tenant, alt, query)
@@ -730,10 +998,10 @@ def central_get_optional(
                     return res, None
                 except CentralError:
                     continue
-            if cache_key:
+            if allow_neg_cache:
                 with OPTIONAL_404_LOCK:
                     OPTIONAL_404_CACHE[cache_key] = utc_now()
-        return None, str(exc)
+        return None, err_str
 
 
 def get_all_pages(
@@ -746,7 +1014,7 @@ def get_all_pages(
     offset = 0
     limit = 1000
     results: list[dict[str, Any]] = []
-    use_next_cursor = path.startswith("/network-monitoring/")
+    use_next_cursor = path.startswith(("/network-monitoring/", "/network-services/"))
     next_cursor: Any = None
     seen_cursors: set[str] = set()
     page_count = 0
@@ -803,10 +1071,11 @@ def get_all_pages_optional(
     query: dict[str, str | int] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     cache_key = f"{tenant.get('tenant_id')}:{path}" if query is None else ""
+    allow_neg_cache = bool(cache_key) and is_optional_feature_path(path)
     if cache_key:
         now = utc_now()
         with OPTIONAL_404_LOCK:
-            ts = OPTIONAL_404_CACHE.get(cache_key)
+            ts = OPTIONAL_404_CACHE.get(cache_key) if allow_neg_cache else None
             if ts is not None and now - ts < OPTIONAL_404_TTL_SECONDS:
                 return [], "HTTP 404 Route Not Found (cached)"
             alt_cached = ALT_PATH_CACHE.get(cache_key)
@@ -819,7 +1088,8 @@ def get_all_pages_optional(
     try:
         return get_all_pages(config, workspace, tenant, path, query), None
     except CentralError as exc:
-        if is_not_found_error(str(exc)):
+        err_str = str(exc)
+        if is_not_found_error(err_str) and not is_device_offline_error(err_str):
             for alt in alternate_paths(path):
                 try:
                     res = get_all_pages(config, workspace, tenant, alt, query)
@@ -829,10 +1099,10 @@ def get_all_pages_optional(
                     return res, None
                 except CentralError:
                     continue
-            if cache_key:
+            if allow_neg_cache:
                 with OPTIONAL_404_LOCK:
                     OPTIONAL_404_CACHE[cache_key] = utc_now()
-        return [], str(exc)
+        return [], err_str
 
 
 def tenant_name(raw: dict[str, Any]) -> str:
@@ -1075,6 +1345,10 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
             "key": key,
             "kind": kind,
             "serial": serial,
+            "model": device.get("model"),
+            "mac": device.get("mac"),
+            "ipv4": device.get("ipv4"),
+            "firmware": device.get("firmware"),
             "site_id": device.get("site_id"),
             "site_name": device.get("site_name"),
             "status": device.get("status"),
@@ -1106,6 +1380,10 @@ def discover_tenant_devices(config: dict[str, Any], workspace: dict[str, Any], t
             "key": key,
             "kind": kind,
             "serial": serial,
+            "model": device.get("model"),
+            "mac": device.get("mac"),
+            "ipv4": device.get("ipv4"),
+            "firmware": device.get("firmware"),
             "site_id": device.get("site_id"),
             "site_name": device.get("site_name"),
             "status": device.get("status"),
@@ -1232,45 +1510,45 @@ def zabbix_config(config: dict[str, Any]) -> dict[str, Any]:
 def zabbix_api_call(config: dict[str, Any], method: str, params: dict[str, Any] | list[Any] | None = None) -> Any:
     zbx = zabbix_config(config)
     api_url = str(zbx["api_url"])
-    ssl_context = None
-    if api_url.lower().startswith("https://"):
-        tls_verify = config_bool(zbx.get("tls_verify", zbx.get("verify_ssl")), True)
-        if tls_verify:
-            ca_file = zbx.get("tls_ca_file")
-            if ca_file:
-                ssl_context = ssl.create_default_context(cafile=str(ca_file))
-        else:
-            ssl_context = ssl._create_unverified_context()
+    tls_verify = config_bool(zbx.get("tls_verify", zbx.get("verify_ssl")), True)
+    ca_file = str(zbx.get("tls_ca_file") or "") if tls_verify else ""
     payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": 1}
     data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json-rpc",
+        "Authorization": f"Bearer {zbx['api_token']}",
+    }
     attempts = int(zbx.get("api_retry_attempts") or 3)
     result: dict[str, Any] | list[Any] | None = None
     for attempt in range(1, max(1, attempts) + 1):
-        req = Request(
-            api_url,
-            data=data,
-            headers={"Accept": "application/json", "Content-Type": "application/json-rpc", "Authorization": f"Bearer {zbx['api_token']}"},
-            method="POST",
-        )
         try:
-            with urlopen(req, timeout=60, context=ssl_context) as response:
-                body = response.read().decode("utf-8")
-                result = json.loads(body) if body else {}
-                break
-        except HTTPError as exc:
-            try:
-                body = exc.read().decode("utf-8", errors="replace")
-            finally:
-                exc.close()
-            if exc.code in {502, 503, 504} and attempt < attempts:
-                time.sleep(min(2 ** attempt, 10))
-                continue
-            raise ZabbixError(f"Zabbix API HTTP {exc.code}: {body}") from exc
-        except URLError as exc:
+            status, _, raw = _pooled_http_request(
+                "POST",
+                api_url,
+                headers=headers,
+                body=data,
+                timeout=60,
+                tls_verify=tls_verify,
+                ca_file=ca_file,
+            )
+            if status >= 400:
+                body_text = raw.decode("utf-8", errors="replace")
+                if status in {502, 503, 504} and attempt < attempts:
+                    time.sleep(min(2 ** attempt, 10))
+                    continue
+                raise ZabbixError(f"Zabbix API HTTP {status}: {body_text}")
+            body_text = raw.decode("utf-8")
+            result = json.loads(body_text) if body_text else {}
+            break
+        except ZabbixError:
+            raise
+        except Exception as exc:
             if attempt < attempts:
                 time.sleep(min(2 ** attempt, 10))
                 continue
-            raise ZabbixError(f"Zabbix API network error calling {api_url}: {exc.reason}") from exc
+            reason = getattr(exc, "reason", exc)
+            raise ZabbixError(f"Zabbix API network error calling {api_url}: {reason}") from exc
     if isinstance(result, dict) and result.get("error"):
         raise ZabbixError(f"Zabbix API {method} failed: {result['error']}")
     return result.get("result") if isinstance(result, dict) else result
@@ -1394,13 +1672,16 @@ def apply_preserved_statuses(source: str, statuses: dict[str, str]) -> str:
         if not desired_status:
             continue
         block_end = len(lines)
-        for next_start, next_indent, _ in blocks[position + 1:]:
-            if next_indent <= block_indent:
-                block_end = next_start
+        for probe in range(start + 1, len(lines)):
+            stripped = lines[probe].lstrip(" ")
+            if stripped and (len(lines[probe]) - len(stripped)) < block_indent + 2:
+                block_end = probe
                 break
+        while block_end > start + 1 and not lines[block_end - 1].strip():
+            block_end -= 1
         status_index = None
         for probe in range(start + 1, block_end):
-            if re.match(rf"^\s{{{block_indent + 2}}}status:\s+", lines[probe]):
+            if re.match(rf"^ {{{block_indent + 2}}}status:\s+", lines[probe]):
                 status_index = probe
                 break
         if desired_status == "DISABLED":
@@ -1449,18 +1730,25 @@ def apply_preserved_template_macros(source: str, template_macros: dict[str, dict
                 break
         if macros_index is None:
             continue
+        macros_end = block_end
+        for probe in range(macros_index + 1, block_end):
+            stripped = lines[probe].lstrip(" ")
+            indent = len(lines[probe]) - len(stripped)
+            if stripped and (indent < block_indent + 2 or (indent == block_indent + 2 and not stripped.startswith("-"))):
+                macros_end = probe
+                break
         probe = macros_index + 1
-        while probe < block_end:
-            macro_match = re.match(rf"^\s{{{block_indent + 2}}}-\s*macro:\s+'(\{{\$.+?\}})'\s*$", lines[probe])
+        while probe < macros_end:
+            macro_match = re.match(rf"^ {{{block_indent + 2}}}-\s*macro:\s+'(\{{\$.+?\}})'\s*$", lines[probe])
             if macro_match:
                 macro_name = macro_match.group(1)
                 desired_value = desired_macros.get(macro_name)
                 if desired_value is not None:
                     value_index = None
-                    for inner in range(probe + 1, block_end):
-                        if re.match(rf"^\s{{{block_indent + 2}}}-\s*macro:\s+'", lines[inner]):
+                    for inner in range(probe + 1, macros_end):
+                        if re.match(rf"^ {{{block_indent + 2}}}-\s*macro:\s+'", lines[inner]):
                             break
-                        if re.match(rf"^\s{{{block_indent + 4}}}value:\s*", lines[inner]):
+                        if re.match(rf"^ {{{block_indent + 4}}}value:\s*", lines[inner]):
                             value_index = inner
                             break
                     if value_index is not None:
@@ -1851,11 +2139,11 @@ def stale_managed_hosts(config: dict[str, Any], plans: list[dict[str, Any]], man
 
 
 def sync_zabbix(config: dict[str, Any], apply: bool = False) -> dict[str, Any]:
+    previous_state = load_gateway_state()
     if config_section(config, "zabbix").get("auto_import_template", True):
         import_result = import_zabbix_template(config, apply=apply)
     else:
         import_result = {"status": "disabled"}
-    previous_state = load_gateway_state()
     devices, state = discover_devices(config)
     plans = build_host_plans(config, devices)
     zbx = config_section(config, "zabbix")
@@ -2222,20 +2510,21 @@ def build_uplink_records(device: dict[str, Any], interfaces: list[dict[str, Any]
             speed_value = None
         if speed_value is not None and speed_value > 100000:
             speed_value = speed_value / 1000000
-        record = {
+        record: dict[str, Any] = {
             "id": identifier or str(len(records) + 1),
             "name": str(first_value(interface, "name", "portName", "port_name", "interfaceName") or identifier or f"uplink-{len(records) + 1}"),
-            "link_status": str(first_value(interface, "status", "health", "linkStatus") or ""),
-            "admin_state": str(first_value(interface, "adminStatus", "admin_state") or ""),
-            "oper_state": str(first_value(interface, "operStatus", "linkStatus", "status") or ""),
-            "speed_mbps": speed_value,
+            "link_status": string_or_empty(first_value(interface, "status", "health", "linkStatus")),
+            "admin_state": string_or_empty(first_value(interface, "adminStatus", "admin_state")),
+            "oper_state": string_or_empty(first_value(interface, "operStatus", "linkStatus", "status")),
             "crc_error_count": pick_numeric(interface, ("crc",)) or 0,
             "drop_count": pick_numeric(interface, ("drop", "dropped")) or 0,
             "error_count": pick_numeric(interface, ("error", "errors")) or 0,
             "neighbor_count": len(local_neighbours),
-            "neighbor_name": str(first_value(local_neighbours[0], "neighborName", "deviceName", "hostname", "name") or "") if local_neighbours else "",
-            "neighbor_type": str(first_value(local_neighbours[0], "deviceType", "neighborDeviceType", "type", "platform") or "") if local_neighbours else "",
+            "neighbor_name": string_or_empty(first_value(local_neighbours[0], "neighborName", "deviceName", "hostname", "name")) if local_neighbours else "",
+            "neighbor_type": string_or_empty(first_value(local_neighbours[0], "deviceType", "neighborDeviceType", "type", "platform")) if local_neighbours else "",
         }
+        if speed_value is not None:
+            record["speed_mbps"] = speed_value
         records.append(record)
     seen: set[str] = set()
     deduped: list[dict[str, Any]] = []
@@ -2258,14 +2547,27 @@ def normalize_interface_records(interfaces: list[dict[str, Any]]) -> list[dict[s
             speed_value = None
         if speed_value is not None and speed_value > 100000:
             speed_value = speed_value / 1000000
-        record["speedMbps"] = speed_value
-        record["neighbourTopologyType"] = first_value(interface, "neighbourType", "neighbourFamily")
-        record["neighbourVendor"] = first_value(interface, "neighbourFunction")
+        if speed_value is not None:
+            record["speedMbps"] = speed_value
+        else:
+            record.pop("speedMbps", None)
+        record["status"] = string_or_empty(first_value(interface, "status"))
+        record["adminStatus"] = string_or_empty(first_value(interface, "adminStatus", "admin_state"))
+        record["operStatus"] = string_or_empty(first_value(interface, "operStatus", "oper_state"))
+        record["neighbour"] = string_or_empty(first_value(interface, "neighbour"))
+        record["neighbourTopologyType"] = string_or_empty(first_value(interface, "neighbourType", "neighbourFamily"))
+        record["neighbourVendor"] = string_or_empty(first_value(interface, "neighbourFunction"))
+        record["transceiverStatus"] = string_or_empty(first_value(interface, "transceiverStatus"))
+        record["transceiverModel"] = string_or_empty(first_value(interface, "transceiverModel", "transceiverType", "transceiverProductNumber"))
+        record["connector"] = string_or_empty(first_value(interface, "connector"))
+        record["crc"] = pick_numeric(interface, ("crc",)) or 0
+        record["drop"] = pick_numeric(interface, ("drop", "dropped")) or 0
+        record["errors"] = pick_numeric(interface, ("error", "errors")) or 0
         record["lldUplink"] = "true" if truthy(first_value(interface, "uplink")) else "false"
-        record["lldConnector"] = str(first_value(interface, "connector") or "")
-        record["lldNeighbour"] = str(first_value(interface, "neighbour") or "")
-        record["lldNeighbourTopologyType"] = str(first_value(record, "neighbourTopologyType") or "")
-        record["lldTransceiverStatus"] = str(first_value(interface, "transceiverStatus") or "")
+        record["lldConnector"] = record["connector"]
+        record["lldNeighbour"] = record["neighbour"]
+        record["lldNeighbourTopologyType"] = record["neighbourTopologyType"]
+        record["lldTransceiverStatus"] = record["transceiverStatus"]
         normalized.append(record)
     return normalized
 
@@ -2334,10 +2636,10 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     first_stats = stats[0] if isinstance(stats, list) and stats and isinstance(stats[0], dict) else {}
     switch_trends = list_items(data.get("switchTrends"))
     first_switch_trend = switch_trends[0] if switch_trends else {}
-    ports = list_items(payload.get("ports"))
-    radios = list_items(payload.get("radios"))
+    ports = list_items(payload.get("ports")) or list_items(data.get("ports"))
+    radios = list_items(payload.get("radios")) or list_items(data.get("radios"))
     interfaces = list_items(payload.get("interfaces"))
-    wlans = list_items(payload.get("wlans"))
+    wlans = list_items(payload.get("wlans")) or list_items(data.get("wlans"))
     firmware = firmware_summary(payload.get("firmware"))
     lag_summary = payload.get("lag_summary")
     stack_members = payload.get("stack_members")
@@ -2345,21 +2647,30 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
     vsx_detail = payload.get("vsx_detail")
     neighbours = list_items(payload.get("neighbours"))
     uplinks = list_items(payload.get("uplinks"))
-    client_count = first_value(
+    raw_client_count = first_value(
         first_stats,
         "clientCount",
         "clients",
         "numClients",
         "associatedClients",
     )
-    if client_count in (None, ""):
-        client_count = first_value(
+    if raw_client_count in (None, ""):
+        raw_client_count = first_value(
             data,
             "clientCount",
             "clients",
             "numClients",
             "associatedClients",
         )
+    client_count: int | None = None
+    if raw_client_count not in (None, ""):
+        try:
+            client_count = int(float(raw_client_count))
+        except (TypeError, ValueError):
+            client_count = None
+    if client_count is None and kind == "ap":
+        client_count = 0
+
     vsx_status = normalize_status(
         first_nested_value(vsx_detail, [
             ("status",),
@@ -2416,12 +2727,15 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
             ("details", "status"),
         ])
     )
-    if live_status:
+    any_offline_err = any(is_device_offline_error(str(v)) for v in (payload.get("errors") or {}).values())
+    if any_offline_err and live_status in ("", "ONLINE"):
+        summary_status = "OFFLINE"
+    elif live_status:
         summary_status = live_status
-    elif device.get("status"):
-        summary_status = normalize_status(device.get("status"))
     elif details_error:
         summary_status = "OFFLINE"
+    elif device.get("status"):
+        summary_status = normalize_status(device.get("status"))
     else:
         summary_status = "ONLINE"
     private_ip = first_value(data, "ipv4", "ipAddress", "ip_address") or device.get("ipv4")
@@ -2459,42 +2773,58 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         except (ValueError, TypeError):
             pass
 
-    summary = {
+    raw_uptime_ms = data.get("uptimeInMillis") if data.get("uptimeInMillis") not in (None, "") else first_value(data, "upTime")
+    uptime_in_millis: int | None = None
+    if raw_uptime_ms not in (None, ""):
+        try:
+            uptime_in_millis = int(float(raw_uptime_ms))
+        except (TypeError, ValueError):
+            uptime_in_millis = None
+    uptime_seconds = millis_to_seconds(uptime_in_millis) if uptime_in_millis is not None else None
+
+    raw_cpu = first_stats.get("cpuUtilization") if kind == "ap" else first_value(data, "cpuUtilization") if first_value(data, "cpuUtilization") not in (None, "") else first_switch_trend.get("cpuUtilization")
+    cpu_utilization: float | None = None
+    if raw_cpu not in (None, ""):
+        try:
+            cpu_utilization = round(float(raw_cpu), 2)
+        except (TypeError, ValueError):
+            cpu_utilization = None
+
+    raw_mem = first_stats.get("memoryUtilization") if kind == "ap" else first_value(data, "memoryUtilization") if first_value(data, "memoryUtilization") not in (None, "") else first_switch_trend.get("memoryUtilization")
+    memory_utilization: float | None = None
+    if raw_mem not in (None, ""):
+        try:
+            memory_utilization = round(float(raw_mem), 2)
+        except (TypeError, ValueError):
+            memory_utilization = None
+
+    summary: dict[str, Any] = {
         "kind": kind,
-        "serial": first_value(data, "serialNumber", "serial", "id") or device.get("serial"),
-        "name": first_value(data, "deviceName", "name", "hostname") or device.get("host"),
-        "model": first_value(data, "model", "partNumber"),
-        "mac": first_value(data, "macAddress", "mac"),
-        "ip": private_ip,
-        "ipv4": private_ip,
-        "public_ip": public_ip,
-        "last_reboot_reason": last_reboot_reason,
-        "negotiated_power": negotiated_power,
-        "default_gateway": default_gateway,
-        "temperature": temperature,
-        "poe_consumption": poe_consumption,
-        "poe_available": poe_available,
-        "power_consumption": power_consumption,
-        "site_id": first_value(data, "siteId", "site_id") or device.get("site_id"),
-        "site_name": first_value(data, "siteName", "site") or device.get("site_name"),
+        "serial": string_or_empty(first_value(data, "serialNumber", "serial", "id") or device.get("serial")),
+        "name": string_or_empty(first_value(data, "deviceName", "name", "hostname") or device.get("host")),
+        "model": string_or_empty(first_value(data, "model", "partNumber") or device.get("model")),
+        "mac": string_or_empty(first_value(data, "macAddress", "mac") or device.get("mac")),
+        "ip": string_or_empty(private_ip),
+        "ipv4": string_or_empty(private_ip),
+        "public_ip": string_or_empty(public_ip),
+        "last_reboot_reason": string_or_empty(last_reboot_reason),
+        "negotiated_power": string_or_empty(negotiated_power),
+        "default_gateway": string_or_empty(default_gateway),
+        "site_id": string_or_empty(first_value(data, "siteId", "site_id") or device.get("site_id")),
+        "site_name": string_or_empty(first_value(data, "siteName", "site") or device.get("site_name")),
         "status": summary_status,
-        "firmware": first_value(data, "firmwareVersion", "softwareVersion"),
-        "uptime_in_millis": data.get("uptimeInMillis") if data.get("uptimeInMillis") not in (None, "") else first_value(data, "upTime"),
-        "uptime_seconds": millis_to_seconds(data.get("uptimeInMillis")) if data.get("uptimeInMillis") not in (None, "") else millis_to_seconds(first_value(data, "upTime")),
-        "cpu_utilization": first_stats.get("cpuUtilization") if kind == "ap" else first_value(data, "cpuUtilization") if first_value(data, "cpuUtilization") not in (None, "") else first_switch_trend.get("cpuUtilization"),
-        "memory_utilization": first_stats.get("memoryUtilization") if kind == "ap" else first_value(data, "memoryUtilization") if first_value(data, "memoryUtilization") not in (None, "") else first_switch_trend.get("memoryUtilization"),
-        "config_status": data.get("configStatus"),
-        "firmware_recommended_version": firmware.get("recommended_version"),
-        "firmware_upgrade_status": firmware.get("upgrade_status"),
-        "firmware_classification": firmware.get("classification"),
-        "firmware_last_upgraded_at": firmware.get("last_upgraded_at"),
+        "firmware": string_or_empty(first_value(data, "firmwareVersion", "softwareVersion") or device.get("firmware")),
+        "config_status": string_or_empty(data.get("configStatus")),
+        "firmware_recommended_version": string_or_empty(firmware.get("recommended_version")),
+        "firmware_upgrade_status": string_or_empty(firmware.get("upgrade_status")),
+        "firmware_classification": string_or_empty(firmware.get("classification")),
+        "firmware_last_upgraded_at": string_or_empty(firmware.get("last_upgraded_at")),
         "endpoint_error_count": error_count,
         "port_down_count": count_down(ports),
         "port_count": len(ports),
         "radio_down_count": count_down(radios),
         "radio_count": len(radios),
         "wlan_count": len(wlans),
-        "client_count": client_count,
         "interface_down_count": count_down(interfaces),
         "interface_count": len(interfaces),
         "neighbour_count": len(neighbours),
@@ -2518,8 +2848,22 @@ def normalize_summary(kind: str, payload: dict[str, Any], device: dict[str, Any]
         "management_module_failed_count": count_unhealthy(management_modules),
         "transceiver_count": len(transceivers) if transceivers else len(transceiver_ports),
         "transceiver_failed_count": count_unhealthy(transceivers) if transceivers else unhealthy_transceiver_count(transceiver_ports),
-        "vsx_status": vsx_status,
+        "vsx_status": string_or_empty(vsx_status),
     }
+    optional_numerics = {
+        "temperature": temperature,
+        "poe_consumption": poe_consumption,
+        "poe_available": poe_available,
+        "power_consumption": power_consumption,
+        "uptime_in_millis": uptime_in_millis,
+        "uptime_seconds": uptime_seconds,
+        "cpu_utilization": cpu_utilization,
+        "memory_utilization": memory_utilization,
+        "client_count": client_count,
+    }
+    for opt_key, opt_val in optional_numerics.items():
+        if opt_val is not None:
+            summary[opt_key] = opt_val
     return summary
 
 
@@ -2555,27 +2899,32 @@ def ensure_firmware_for_device(config: dict[str, Any], workspace: dict[str, Any]
     if cached is not None:
         return cached, None
     tenant_id = str(tenant.get("tenant_id") or "")
-    now = utc_now()
-    should_fetch_tenant = False
-    with FIRMWARE_CACHE_LOCK:
-        last_tenant_fetch = TENANT_FIRMWARE_CACHE.get(tenant_id, 0)
-        if now - last_tenant_fetch >= 3600:
-            TENANT_FIRMWARE_CACHE[tenant_id] = now
-            should_fetch_tenant = True
-    if should_fetch_tenant:
-        records, err = get_all_pages_optional(config, workspace, tenant, "/network-services/v1/firmware-details")
-        if records:
-            now_ts = utc_now()
-            with FIRMWARE_CACHE_LOCK:
-                for rec in records:
-                    rec_serial = str(first_value(rec, "serialNumber", "serial", "id") or "")
-                    if rec_serial:
-                        FIRMWARE_CACHE[rec_serial] = (now_ts, {"items": [rec]})
-            cached = get_cached_firmware(serial)
-            if cached is not None:
-                return cached, None
-            set_cached_firmware(serial, {})
-            return {}, None
+    if tenant_id:
+        with FIRMWARE_CACHE_LOCK:
+            need_batch = utc_now() - TENANT_FIRMWARE_CACHE.get(tenant_id, 0) >= 3600
+            tenant_lock = TENANT_FIRMWARE_LOCKS.setdefault(tenant_id, threading.Lock())
+        if need_batch:
+            with tenant_lock:
+                cached = get_cached_firmware(serial)
+                if cached is not None:
+                    return cached, None
+                with FIRMWARE_CACHE_LOCK:
+                    still_need = utc_now() - TENANT_FIRMWARE_CACHE.get(tenant_id, 0) >= 3600
+                if still_need:
+                    records, batch_err = get_all_pages_optional(config, workspace, tenant, "/network-services/v1/firmware-details")
+                    if batch_err is None:
+                        now_ts = utc_now()
+                        with FIRMWARE_CACHE_LOCK:
+                            TENANT_FIRMWARE_CACHE[tenant_id] = now_ts
+                            for rec in records:
+                                rec_serial = str(first_value(rec, "serialNumber", "serial", "id") or "")
+                                if rec_serial:
+                                    FIRMWARE_CACHE[rec_serial] = (now_ts, {"items": [rec]})
+                        cached = get_cached_firmware(serial)
+                        if cached is not None:
+                            return cached, None
+                        set_cached_firmware(serial, {})
+                        return {}, None
     res, err = central_get_optional(
         config,
         workspace,
@@ -2597,13 +2946,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
         "details": (device_path(kind, serial), None, False),
     }
 
-    if kind == "ap":
-        tasks.update({
-            "radios": (f"/network-monitoring/v1/aps/{quote(serial)}/radios", None, False),
-            "ports": (f"/network-monitoring/v1/aps/{quote(serial)}/ports", None, False),
-            "wlans": (f"/network-monitoring/v1/aps/{quote(serial)}/wlans", None, False),
-        })
-    elif kind == "switch":
+    if kind == "switch":
         tasks.update({
             "interfaces": (f"/network-monitoring/v1/switches/{quote(serial)}/interfaces", None, True),
             "hardware_trends": (f"/network-monitoring/v1/switches/{quote(serial)}/hardware-trends", None, False),
@@ -2647,7 +2990,30 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
                 continue
             payload["errors"][name] = err
 
-    if kind == "switch":
+    if any(is_device_offline_error(str(v)) for v in payload["errors"].values()):
+        with OPTIONAL_404_LOCK:
+            for path, q, _ in tasks.values():
+                if q is None:
+                    OPTIONAL_404_CACHE.pop(f"{tenant.get('tenant_id')}:{path}", None)
+
+    details_err = payload["errors"].get("details")
+    if details_err and not payload.get("details") and not is_not_found_error(details_err):
+        raise CentralError(details_err)
+
+    if kind == "ap":
+        detail_raw = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        detail_ap = detail_raw.get("ap") if isinstance(detail_raw.get("ap"), dict) else detail_raw
+        for sub_name in ("radios", "ports", "wlans"):
+            if isinstance(detail_ap, dict) and sub_name in detail_ap:
+                payload[sub_name] = detail_ap.get(sub_name) or []
+            elif detail_ap:
+                val, err = central_get_optional(config, workspace, tenant, f"/network-monitoring/v1/aps/{quote(serial)}/{sub_name}", None)
+                payload[sub_name] = val or []
+                if err and not is_not_found_error(err):
+                    payload["errors"][sub_name] = err
+            else:
+                payload[sub_name] = []
+    elif kind == "switch":
         payload["interfaces"] = normalize_interface_records(payload.get("interfaces") or [])
         detail_data = payload.get("details") or {}
         stack_id = first_value(detail_data, "stackId", "stack_id")
@@ -2657,7 +3023,7 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
             payload["stack_members"] = val or {}
             if err and not is_not_found_error(err):
                 payload["errors"]["stack_members"] = err
-        
+
         payload["uplinks"] = build_uplink_records(
             device,
             payload["interfaces"],
@@ -2669,8 +3035,9 @@ def collect_device_payload(config: dict[str, Any], workspace: dict[str, Any], te
     return payload
 
 
-def key_jitter_seconds(key: str, max_jitter: int = 30) -> int:
-    return (abs(hash(key)) % (max_jitter * 2 + 1)) - max_jitter
+def key_jitter_seconds(key: str, max_jitter: int = 60) -> int:
+    digest_int = int.from_bytes(hashlib.md5(key.encode("utf-8")).digest()[:4], "big")
+    return (digest_int % (max_jitter * 2 + 1)) - max_jitter
 
 
 def _fetch_and_build_device_body(config: dict[str, Any], key: str, device: dict[str, Any]) -> dict[str, Any]:
@@ -2690,40 +3057,29 @@ def _fetch_and_build_device_body(config: dict[str, Any], key: str, device: dict[
     return body
 
 
-def trigger_background_device_fetch(config: dict[str, Any], key: str, device: dict[str, Any]) -> None:
-    cache_key = f"device:{key}"
+def _trigger_background_swr(cache_key: str, fetch_fn: Any) -> None:
     with IN_FLIGHT_LOCK:
-        if key in IN_FLIGHT_REQUESTS:
+        if cache_key in IN_FLIGHT_REQUESTS:
             return
-        event = threading.Event()
-        IN_FLIGHT_REQUESTS[key] = event
-    executor = get_background_executor()
-    executor.submit(_background_device_fetch_worker, config, key, device, cache_key, event)
+        own_event = threading.Event()
+        IN_FLIGHT_REQUESTS[cache_key] = own_event
+
+    def _runner() -> None:
+        try:
+            body = fetch_fn()
+            update_cache(cache_key, body)
+        except Exception as exc:
+            LOGGER.warning(f"Background refresh failed for {cache_key}: {exc}")
+        finally:
+            with IN_FLIGHT_LOCK:
+                if IN_FLIGHT_REQUESTS.get(cache_key) is own_event:
+                    IN_FLIGHT_REQUESTS.pop(cache_key, None)
+                own_event.set()
+
+    get_background_executor().submit(_runner)
 
 
-def _background_device_fetch_worker(config: dict[str, Any], key: str, device: dict[str, Any], cache_key: str, event: threading.Event) -> None:
-    try:
-        body = _fetch_and_build_device_body(config, key, device)
-        update_cache(cache_key, body)
-    except Exception as exc:
-        LOGGER.warning(f"Background refresh failed for device {key}: {exc}")
-    finally:
-        with IN_FLIGHT_LOCK:
-            IN_FLIGHT_REQUESTS.pop(key, None)
-            event.set()
-
-
-def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, dict[str, Any]]:
-    state = load_gateway_state()
-    devices = state.get("devices") if isinstance(state.get("devices"), dict) else {}
-    device = devices.get(key)
-    if not isinstance(device, dict):
-        return 404, {"gateway": {"status": "not_found"}, "error": f"Device key {key} not found. Run sync-zabbix first."}
-
-    base_ttl = int(config_section(config, "gateway").get("device_cache_ttl_seconds") or 600)
-    ttl = max(120, base_ttl + key_jitter_seconds(key, 30))
-    cache_key = f"device:{key}"
-
+def _served_from_swr_cache(cache_key: str, ttl: int, fetch_fn: Any) -> tuple[int, dict[str, Any] | bytes]:
     with HTTP_CACHE_LOCK:
         cached = HTTP_CACHE.get(cache_key)
         if cached and isinstance(cached.get("body"), dict):
@@ -2737,7 +3093,7 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
                 body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="hit", age=age)
                 return 200, body
             if age < (ttl * 2):
-                trigger_background_device_fetch(config, key, device)
+                _trigger_background_swr(cache_key, fetch_fn)
                 raw_bytes = cached.get("bytes")
                 if raw_bytes is not None:
                     return 200, raw_bytes
@@ -2746,26 +3102,34 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
                 body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache=cache_label, age=age)
                 return 200, body
 
-    # Single-flight deduplication for cold misses
-    wait_event = None
+    own_event: threading.Event | None = None
+    wait_event: threading.Event | None = None
     with IN_FLIGHT_LOCK:
-        if key in IN_FLIGHT_REQUESTS:
-            wait_event = IN_FLIGHT_REQUESTS[key]
+        existing_event = IN_FLIGHT_REQUESTS.get(cache_key)
+        if existing_event is not None:
+            wait_event = existing_event
         else:
-            in_flight_event = threading.Event()
-            IN_FLIGHT_REQUESTS[key] = in_flight_event
+            own_event = threading.Event()
+            IN_FLIGHT_REQUESTS[cache_key] = own_event
 
     if wait_event is not None:
         wait_event.wait(timeout=25.0)
         with HTTP_CACHE_LOCK:
             cached = HTTP_CACHE.get(cache_key)
             if cached and isinstance(cached.get("body"), dict):
+                raw_bytes = cached.get("bytes")
+                if raw_bytes is not None:
+                    return 200, raw_bytes
                 body = dict(cached["body"])
                 body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="hit_inflight")
                 return 200, body
+        with IN_FLIGHT_LOCK:
+            if cache_key not in IN_FLIGHT_REQUESTS:
+                own_event = threading.Event()
+                IN_FLIGHT_REQUESTS[cache_key] = own_event
 
     try:
-        body = _fetch_and_build_device_body(config, key, device)
+        body = fetch_fn()
         update_cache(cache_key, body)
         return 200, body
     except Exception as exc:
@@ -2777,10 +3141,25 @@ def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, 
             return 200, body
         return 502, {"gateway": {"status": "error"}, "error": str(exc)}
     finally:
-        with IN_FLIGHT_LOCK:
-            fin_event = IN_FLIGHT_REQUESTS.pop(key, None)
-            if fin_event is not None:
-                fin_event.set()
+        if own_event is not None:
+            with IN_FLIGHT_LOCK:
+                if IN_FLIGHT_REQUESTS.get(cache_key) is own_event:
+                    IN_FLIGHT_REQUESTS.pop(cache_key, None)
+                own_event.set()
+
+
+def gateway_response_for_device(config: dict[str, Any], key: str) -> tuple[int, dict[str, Any] | bytes]:
+    state = load_gateway_state()
+    devices = state.get("devices") if isinstance(state.get("devices"), dict) else {}
+    device = devices.get(key)
+    if not isinstance(device, dict):
+        return 404, {"gateway": {"status": "not_found"}, "error": f"Device key {key} not found. Run sync-zabbix first."}
+
+    base_ttl = int(config_section(config, "gateway").get("device_cache_ttl_seconds") or 600)
+    jitter_bound = max(30, min(90, int(base_ttl * 0.1)))
+    ttl = max(120, base_ttl + key_jitter_seconds(key, jitter_bound))
+    cache_key = f"device:{key}"
+    return _served_from_swr_cache(cache_key, ttl, lambda: _fetch_and_build_device_body(config, key, device))
 
 
 def context_for_site(config: dict[str, Any], site_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -2799,142 +3178,25 @@ def context_for_site(config: dict[str, Any], site_id: str) -> tuple[dict[str, An
     return None
 
 
-def trigger_background_site_health_fetch(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], site_id: str, cache_key: str) -> None:
-    flight_key = f"site-health:{site_id}"
-    with IN_FLIGHT_LOCK:
-        if flight_key in IN_FLIGHT_REQUESTS:
-            return
-        event = threading.Event()
-        IN_FLIGHT_REQUESTS[flight_key] = event
-    executor = get_background_executor()
-    executor.submit(_background_site_health_worker, config, workspace, tenant, site_id, cache_key, flight_key, event)
-
-
-def _background_site_health_worker(config: dict[str, Any], workspace: dict[str, Any], tenant: dict[str, Any], site_id: str, cache_key: str, flight_key: str, event: threading.Event) -> None:
-    try:
-        data = central_get(config, workspace, tenant, f"/network-monitoring/v1/site-health/{quote(site_id)}")
-        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
-        update_cache(cache_key, body)
-    except Exception as exc:
-        LOGGER.warning(f"Background refresh failed for site {site_id}: {exc}")
-    finally:
-        with IN_FLIGHT_LOCK:
-            IN_FLIGHT_REQUESTS.pop(flight_key, None)
-            event.set()
-
-
-def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tuple[int, dict[str, Any]]:
+def gateway_response_for_site_health(config: dict[str, Any], site_id: str) -> tuple[int, dict[str, Any] | bytes]:
     context = context_for_site(config, site_id)
     if not context:
         return 404, {"gateway": {"status": "not_found"}, "error": f"Site {site_id} not found in gateway state"}
     workspace, tenant = context
     base_ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 600)
-    ttl = max(120, base_ttl + key_jitter_seconds(site_id, 30))
+    jitter_bound = max(30, min(90, int(base_ttl * 0.1)))
+    ttl = max(120, base_ttl + key_jitter_seconds(site_id, jitter_bound))
     cache_key = f"site-health:{tenant['tenant_id']}:{site_id}"
-    flight_key = f"site-health:{site_id}"
 
-    with HTTP_CACHE_LOCK:
-        cached = HTTP_CACHE.get(cache_key)
-        if cached and isinstance(cached.get("body"), dict):
-            age = utc_now() - int(cached.get("fetched_at") or 0)
-            soft_window = max(30, int(ttl * 0.25))
-            if age < (ttl - soft_window):
-                raw_bytes = cached.get("bytes")
-                if raw_bytes is not None:
-                    return 200, raw_bytes
-                body = dict(cached["body"])
-                body["gateway"] = dict(body.get("gateway") or {}, cache="hit", age=age)
-                return 200, body
-            if age < (ttl * 2):
-                trigger_background_site_health_fetch(config, workspace, tenant, site_id, cache_key)
-                raw_bytes = cached.get("bytes")
-                if raw_bytes is not None:
-                    return 200, raw_bytes
-                body = dict(cached["body"])
-                cache_label = "hit" if age < ttl else "hit_stale"
-                body["gateway"] = dict(body.get("gateway") or {}, cache=cache_label, age=age)
-                return 200, body
-
-    wait_event = None
-    with IN_FLIGHT_LOCK:
-        if flight_key in IN_FLIGHT_REQUESTS:
-            wait_event = IN_FLIGHT_REQUESTS[flight_key]
-        else:
-            in_flight_event = threading.Event()
-            IN_FLIGHT_REQUESTS[flight_key] = in_flight_event
-
-    if wait_event is not None:
-        wait_event.wait(timeout=25.0)
-        with HTTP_CACHE_LOCK:
-            cached = HTTP_CACHE.get(cache_key)
-            if cached and isinstance(cached.get("body"), dict):
-                body = dict(cached["body"])
-                body["gateway"] = dict(body.get("gateway") or {}, cache="hit_inflight")
-                return 200, body
-
-    try:
+    def _fetch() -> dict[str, Any]:
         data = central_get(config, workspace, tenant, f"/network-monitoring/v1/site-health/{quote(site_id)}")
-        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
-        update_cache(cache_key, body)
-        return 200, body
-    except Exception as exc:
-        with HTTP_CACHE_LOCK:
-            cached = HTTP_CACHE.get(cache_key)
-        if cached and isinstance(cached.get("body"), dict):
-            body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
-            return 200, body
-        return 502, {"gateway": {"status": "error"}, "error": str(exc)}
-    finally:
-        with IN_FLIGHT_LOCK:
-            fin_event = IN_FLIGHT_REQUESTS.pop(flight_key, None)
-            if fin_event is not None:
-                fin_event.set()
+        return {
+            "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
+            "site_id": site_id,
+            "data": data,
+        }
 
-
-def trigger_background_client_onboarding_fetch(
-    config: dict[str, Any],
-    workspace: dict[str, Any],
-    tenant: dict[str, Any],
-    site_id: str,
-    field: str,
-    window_ms: int,
-    cache_key: str,
-    flight_key: str,
-) -> None:
-    with IN_FLIGHT_LOCK:
-        if flight_key in IN_FLIGHT_REQUESTS:
-            return
-        event = threading.Event()
-        IN_FLIGHT_REQUESTS[flight_key] = event
-    executor = get_background_executor()
-    executor.submit(_background_client_onboarding_worker, config, workspace, tenant, site_id, field, window_ms, cache_key, flight_key, event)
-
-
-def _background_client_onboarding_worker(
-    config: dict[str, Any],
-    workspace: dict[str, Any],
-    tenant: dict[str, Any],
-    site_id: str,
-    field: str,
-    window_ms: int,
-    cache_key: str,
-    flight_key: str,
-    event: threading.Event,
-) -> None:
-    try:
-        end_ms = int(time.time() * 1000)
-        start_ms = end_ms - window_ms
-        params = {"site-id": site_id, "start-at": start_ms, "end-at": end_ms, "field": field}
-        data = central_get(config, workspace, tenant, "/network-monitoring/v1/client-onboarding-stage/count", params)
-        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
-        update_cache(cache_key, body)
-    except Exception as exc:
-        LOGGER.warning(f"Background refresh failed for client-onboarding site {site_id}: {exc}")
-    finally:
-        with IN_FLIGHT_LOCK:
-            IN_FLIGHT_REQUESTS.pop(flight_key, None)
-            event.set()
+    return _served_from_swr_cache(cache_key, ttl, _fetch)
 
 
 def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str, query_params: dict[str, list[str]]) -> tuple[int, dict[str, Any] | bytes]:
@@ -2942,73 +3204,29 @@ def gateway_response_for_client_onboarding(config: dict[str, Any], site_id: str,
     if not context:
         return 404, {"gateway": {"status": "not_found"}, "error": f"Site {site_id} not found in gateway state"}
     workspace, tenant = context
-    window_ms = int(query_params.get("window-ms", ["3600000"])[0])
+    try:
+        window_ms = int(query_params.get("window-ms", ["3600000"])[0])
+    except (TypeError, ValueError):
+        window_ms = 3600000
     field = query_params.get("field", ["topreasons"])[0]
     base_ttl = int(config_section(config, "gateway").get("site_cache_ttl_seconds") or 600)
-    ttl = max(120, base_ttl + key_jitter_seconds(f"{site_id}:{field}", 30))
+    jitter_bound = max(30, min(90, int(base_ttl * 0.1)))
+    ttl = max(120, base_ttl + key_jitter_seconds(f"{site_id}:{field}", jitter_bound))
     cache_key = f"client-onboarding:{tenant['tenant_id']}:{site_id}:{field}:{window_ms}"
-    flight_key = f"client-onboarding:{site_id}:{field}:{window_ms}"
 
-    with HTTP_CACHE_LOCK:
-        cached = HTTP_CACHE.get(cache_key)
-        if cached and isinstance(cached.get("body"), dict):
-            age = utc_now() - int(cached.get("fetched_at") or 0)
-            soft_window = max(30, int(ttl * 0.25))
-            if age < (ttl - soft_window):
-                raw_bytes = cached.get("bytes")
-                if raw_bytes is not None:
-                    return 200, raw_bytes
-                body = dict(cached["body"])
-                body["gateway"] = dict(body.get("gateway") or {}, cache="hit", age=age)
-                return 200, body
-            if age < (ttl * 2):
-                trigger_background_client_onboarding_fetch(config, workspace, tenant, site_id, field, window_ms, cache_key, flight_key)
-                raw_bytes = cached.get("bytes")
-                if raw_bytes is not None:
-                    return 200, raw_bytes
-                body = dict(cached["body"])
-                cache_label = "hit" if age < ttl else "hit_stale"
-                body["gateway"] = dict(body.get("gateway") or {}, cache=cache_label, age=age)
-                return 200, body
-
-    wait_event = None
-    with IN_FLIGHT_LOCK:
-        if flight_key in IN_FLIGHT_REQUESTS:
-            wait_event = IN_FLIGHT_REQUESTS[flight_key]
-        else:
-            in_flight_event = threading.Event()
-            IN_FLIGHT_REQUESTS[flight_key] = in_flight_event
-
-    if wait_event is not None:
-        wait_event.wait(timeout=25.0)
-        with HTTP_CACHE_LOCK:
-            cached = HTTP_CACHE.get(cache_key)
-            if cached and isinstance(cached.get("body"), dict):
-                body = dict(cached["body"])
-                body["gateway"] = dict(body.get("gateway") or {}, cache="hit_inflight")
-                return 200, body
-
-    end_ms = int(time.time() * 1000)
-    start_ms = end_ms - window_ms
-    params = {"site-id": site_id, "start-at": start_ms, "end-at": end_ms, "field": field}
-    try:
+    def _fetch() -> dict[str, Any]:
+        end_ms = int(time.time() * 1000)
+        start_ms = end_ms - window_ms
+        params = {"site-id": site_id, "start-at": start_ms, "end-at": end_ms, "field": field}
         data = central_get(config, workspace, tenant, "/network-monitoring/v1/client-onboarding-stage/count", params)
-        body = {"gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()}, "site_id": site_id, "data": data}
-        update_cache(cache_key, body)
-        return 200, body
-    except Exception as exc:
-        with HTTP_CACHE_LOCK:
-            cached = HTTP_CACHE.get(cache_key)
-        if cached and isinstance(cached.get("body"), dict):
-            body = dict(cached["body"])
-            body["gateway"] = dict(body.get("gateway") or {}, status="ok", cache="stale", error=str(exc))
-            return 200, body
-        return 502, {"gateway": {"status": "error"}, "error": str(exc)}
-    finally:
-        with IN_FLIGHT_LOCK:
-            fin_event = IN_FLIGHT_REQUESTS.pop(flight_key, None)
-            if fin_event is not None:
-                fin_event.set()
+        return {
+            "gateway": {"status": "ok", "cache": "miss", "fetched_at": utc_now(), "fetched_at_iso": iso_now()},
+            "site_id": site_id,
+            "summary": summarize_client_onboarding(data),
+            "data": data,
+        }
+
+    return _served_from_swr_cache(cache_key, ttl, _fetch)
 
 
 def gateway_health(config: dict[str, Any]) -> dict[str, Any]:
@@ -3141,6 +3359,7 @@ def run_gateway(config: dict[str, Any]) -> None:
     port = int(gateway.get("port") or 6767)
     max_http_workers = int(gateway.get("max_http_workers") or 8)
     GatewayHandler.config = config
+    package_version_status(config)
     server = QuietThreadPoolHTTPServer((listen, port), GatewayHandler, max_workers=max_http_workers)
     LOGGER.info(f"Gateway listening on {listen}:{port} (version {APP_VERSION}, http_workers={max_http_workers})")
     server.serve_forever()
@@ -3170,6 +3389,21 @@ def raise_nofile_limit(target: int = 65536) -> None:
             LOGGER.info(f"Raised RLIMIT_NOFILE soft limit from {soft} to {desired} (hard={hard})")
     except Exception:
         pass
+
+
+def install_signal_handlers() -> None:
+    def _handle_signal(signum: int, _frame: Any) -> None:
+        LOGGER.info(f"Received signal {signum}, flushing HTTP cache before exit")
+        flush_http_cache_on_exit()
+        raise SystemExit(0)
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _handle_signal)
+            except Exception:
+                pass
 
 
 def main() -> int:
@@ -3203,9 +3437,11 @@ def main() -> int:
             print(json.dumps(sync_zabbix(config, apply=args.apply), ensure_ascii=True))
             return 0
         if args.command == "gateway":
+            install_signal_handlers()
             run_gateway(config)
             return 0
         if args.command == "run":
+            install_signal_handlers()
             run_combined(config)
             return 0
     except KeyboardInterrupt:
