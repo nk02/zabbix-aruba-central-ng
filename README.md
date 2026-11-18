@@ -23,9 +23,10 @@ The gateway keeps all Aruba API calls behind one rate limiter and provides produ
 - **HTTP/1.1 Keep-Alive & TLS Reuse**: reuses pooled HTTPS connections and cached `SSLContext` instances across Aruba Central, GreenLake, and Zabbix API calls, avoiding repeated TCP/TLS handshakes and ephemeral port churn.
 - **High-Performance In-Memory Cache**: responses across all endpoints (`device`, `site-health`, `client-onboarding-stage`) are cached as pre-serialized UTF-8 bytes (`cached["bytes"]`), giving cache hits sub-2ms response times with near-zero CPU overhead, with graceful disk flush on `SIGTERM`/`SIGINT`.
 - **Tiered Cache Windows & Batching**:
-  - Device metrics & site health: configurable TTL (default `600s` / 10 minutes, matching Central's internal polling frequency). AP collection extracts radios, ports, and WLANs from a single `/network-monitoring/v1/aps/{serial}` call.
+  - Device metrics & site health: configurable TTL (default `600s` / 10 minutes, matching Central's internal polling frequency). AP collection extracts radios, ports, and WLANs from a single `/network-monitoring/v1/aps/{serial}` call; gateway collection collects WAN uplinks (`/network-monitoring/v1/gateways/{serial}/uplinks`), LAN/WAN tunnels (`/network-monitoring/v1/gateways/{serial}/tunnels`), and optional cellular modem stats (`/network-monitoring/v1/gateways/{serial}/modem-stat`).
   - Tenant-batched firmware details: fetched once per tenant (up to 1000 devices per call) under a per-tenant lock and cached for 1 hour per serial, reducing 300+ per-device firmware calls down to 1 call per tenant per hour.
-  - Negative 404 cache (12h): optional switch endpoints (`/vsx`, `/lag-summary`, `/hardware-trends`) that return `404` on models without those features are cached in a negative cache for 12 hours, eliminating repeated 404 probes.
+  - Tenant expiring subscriptions (6h): 12-month expiring subscription summary is fetched per tenant via `/network-monitoring/v1/subscription-expiring-summary` and cached for 6 hours per tenant.
+  - Negative 404 cache (12h): optional switch endpoints (`/vsx`, `/lag-summary`, `/hardware-trends`) and optional gateway/subscription endpoints (`/uplinks`, `/tunnels`, `/modem-stat`, `/subscription-expiring-summary`) that return `404` on models or tenants without those features are cached in a negative cache for 12 hours, eliminating repeated 404 probes.
   - GreenLake OAuth tokens: kept in memory with disk write-through, eliminating disk I/O on every API call.
 - **Stale-While-Revalidate (SWR) with Jitter**: background refreshes use deterministic ±10% TTL jitter and single-flight deduplication across all endpoints to prevent thundering herd / cache stampedes, while preserving valid cached data across transient upstream 5xx errors.
 - **Template Hash Check**: persists the rendered template SHA-256 hash in `gateway_state.json` and skips redundant Zabbix template imports across sync cycles and service restarts when unchanged.
@@ -447,22 +448,30 @@ Device templates use:
   - config synchronization status and endpoint error count
   - firmware detail enrichment: recommended firmware version, upgrade status, and last upgraded timestamp
 - AP-specific monitoring:
-  - power negotiated state (`summary.negotiated_power`) and default gateway (`summary.default_gateway`)
-  - AP radios, physical Ethernet ports, and WLAN client payloads
+  - power negotiated state (`summary.negotiated_power`), default gateway (`summary.default_gateway`), and gateway cluster association (`summary.gateway_cluster` from `gatewayClusters`)
+  - `hibernate` power-save mode detection (`central.ap.hibernate`), suppressing false radio-down alerts when an AP is in hibernate mode
+  - AP Ethernet uplink port monitoring (`isUplink`) for status (`central.ap.uplink_status`), speed (`central.ap.uplink_speed_mbps`), and duplex (`central.ap.uplink_duplex`), with an enabled half-duplex alert and an optional `< 1 Gbps` speed alert (disabled by default)
+  - max radio channel utilization (`central.ap.max_radio_channel_utilization`, with an optional `> 85%` alert disabled by default) and dynamic `AP radio discovery` (LLD) covering 2.4 / 5 / 6 GHz radio status, channel, bandwidth, Tx power (`dBm`), channel utilization (`%`), noise floor (`dBm`), and client count
+  - physical Ethernet ports and WLAN client payloads
 - Switch-specific monitoring:
+  - overall switch health status (`summary.health`) and health degradation reasons (`summary.health_reasons`)
+  - part number (`jNumber` / SKU via `summary.part_number`) and switch role (`summary.role`)
   - system temperature in °C (`summary.temperature`)
-  - PoE budget available (`summary.poe_available`), PoE consumption (`summary.poe_consumption`) with high utilization alert (`> 85%`), and total power consumption (`summary.power_consumption`)
+  - PoE budget available (`summary.poe_available`), PoE consumption (`summary.poe_consumption`) with high utilization alert (`> 85%`), PoE active and fault port counts (`summary.poe_active_port_count`, `summary.poe_fault_port_count`) with PoE port fault alerting, and total power consumption (`summary.power_consumption`)
   - aggregated switch counters: total interfaces, interfaces down, total uplinks, uplinks down, aggregated CRC errors, drop counts, neighbours, and failed transceivers
   - dynamic `Switch uplink discovery` (LLD) extracting speed, duplex, admin/oper status, errors, and LLDP neighbour details for active uplinks
   - full `Switch interface discovery` (LLD) covering all ports (kept disabled by default to maintain low database volume, easily enabled via LLD macros)
   - best-effort stack, LAG, VSX, and hardware health payloads where the tenant/API/model exposes them
-- Gateway-specific monitoring: status, firmware, inventory fields, reboot reason, and ports
+- Gateway-specific monitoring:
+  - overall health status (`summary.health`), role (`summary.role`), config synchronization status (`central.device.config_status`, with an optional out-of-sync alert disabled by default), firmware, inventory fields, reboot reason, and ports
+  - WAN uplinks (`/network-monitoring/v1/gateways/{serial}/uplinks`) with uplink count and down alerting, LAN/WAN tunnels (`/network-monitoring/v1/gateways/{serial}/tunnels`) with tunnel count and optional down alerting (disabled by default), and optional cellular modem stats (`/network-monitoring/v1/gateways/{serial}/modem-stat` with 12h negative 404 caching)
+  - dynamic `Gateway WAN uplink discovery` (LLD) monitoring per-uplink link status, operational state (with warning alerting when not Up), provider, and public IP
 
 Site templates use:
 
-- one Site Health HTTP master item;
-- one Client Onboarding HTTP master item;
-- dependent items for gateway status, Good/Fair/Poor health score, and client onboarding failed count.
+- one Site Health HTTP master item (`central.site.health.raw`);
+- one Client Onboarding HTTP master item (`central.site.client_onboarding.raw`);
+- dependent items for gateway status, Good/Fair/Poor health scores, site client and device health breakdowns (`clients_total`, `clients_poor`, `devices_offline`, `devices_poor`, `reasons`), total client onboarding failed count, per-stage onboarding failure counts (`assoc`, `auth`, `dhcp`, `dns`), and top onboarding failure reason (`summary.top_reason`).
 
 The sync command creates one managed Zabbix Site host for each Central site discovered from monitored devices. Site hosts use `{$CENTRAL.SITE.ID}` and the same gateway URL macro as device hosts.
 
@@ -607,6 +616,7 @@ The Zabbix gateway host is not only informational. Keep it enabled, because it m
 - HTTP gateway reachability and `/api/v2/health` status;
 - gateway package/template update availability;
 - managed Central device count;
+- 12-month expiring subscription summary (`central.gateway.subscriptions_expiring_12m`), fetched per tenant via `/network-monitoring/v1/subscription-expiring-summary` and cached for 6 hours per tenant (with 12h negative 404 caching when unsupported);
 - stale managed host count and stale managed host names;
 - last successful Zabbix sync age;
 - cache size and configured Central API rate limit.

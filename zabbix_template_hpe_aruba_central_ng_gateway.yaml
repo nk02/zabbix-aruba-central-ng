@@ -21,7 +21,7 @@ zabbix_export:
       value: '7200'
       description: Maximum allowed age of the last successful gateway state sync, in seconds.
     - macro: '{$CENTRAL.TEMPLATE.VERSION}'
-      value: 2.0.19
+      value: 2.0.20
       description: Version of this template package.
     items:
     - uuid: e77cd7deb4b645d8a881aab339804248
@@ -187,6 +187,18 @@ zabbix_export:
         - $.package.template.latest
       master_item:
         key: central.gateway.health.raw
+    - uuid: db92b16118384e47a651004d8857a605
+      name: Gateway subscriptions expiring in 12m
+      type: DEPENDENT
+      key: central.gateway.subscriptions_expiring_12m
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.subscriptions.expiring_12m_count
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.gateway.health.raw
 
   - uuid: b525b1eac6a24f859fbcec657130987d
     template: HPE Aruba Central NG - Site
@@ -277,6 +289,66 @@ zabbix_export:
         expression: last(/HPE Aruba Central NG - Site/central.site.health.poor)>0
         name: 'Site {HOST.NAME}: poor health detected'
         priority: AVERAGE
+    - uuid: d9a7642d4f354ac6af187d107fdc3ef3
+      name: Site connected clients
+      type: DEPENDENT
+      key: central.site.clients.total
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.clients_total
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.health.raw
+    - uuid: 688a617e90734294b006e7ee3a6675a7
+      name: Site poor health clients
+      type: DEPENDENT
+      key: central.site.clients.poor
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.clients_poor
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.health.raw
+    - uuid: b6acfc1d859c45e2bf405da06d519976
+      name: Site offline devices
+      type: DEPENDENT
+      key: central.site.devices.offline
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.devices_offline
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.health.raw
+    - uuid: e5eadda82644439ab355dc57d5e03777
+      name: Site poor health devices
+      type: DEPENDENT
+      key: central.site.devices.poor
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.devices_poor
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.health.raw
+    - uuid: c8b2c926d31f430c84825a8013bdc73f
+      name: Site health degradation reasons
+      type: DEPENDENT
+      key: central.site.health.reasons
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.reasons
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.health.raw
     - uuid: 2fedbfbdc29342bf80eff691981b73ef
       name: Site client onboarding raw master item
       type: HTTP_AGENT
@@ -311,6 +383,66 @@ zabbix_export:
         name: 'Site {HOST.NAME}: high client onboarding failure count'
         priority: WARNING
         status: DISABLED
+    - uuid: e99aeed8aade4816be681d4aac6f5ba8
+      name: Site client onboarding association failed count
+      type: DEPENDENT
+      key: central.site.client_onboarding.assoc_failed
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.by_stage.assoc
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.client_onboarding.raw
+    - uuid: 02070c6d93e844ffbed0b1f991e43b51
+      name: Site client onboarding authentication failed count
+      type: DEPENDENT
+      key: central.site.client_onboarding.auth_failed
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.by_stage.auth
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.client_onboarding.raw
+    - uuid: 9d7225ad2c674fe49334a1d17f183364
+      name: Site client onboarding DHCP failed count
+      type: DEPENDENT
+      key: central.site.client_onboarding.dhcp_failed
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.by_stage.dhcp
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.client_onboarding.raw
+    - uuid: a143187b718b43ff9215b03939ac9254
+      name: Site client onboarding DNS failed count
+      type: DEPENDENT
+      key: central.site.client_onboarding.dns_failed
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.by_stage.dns
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.client_onboarding.raw
+    - uuid: 8cf1c5cf84894f7196a7b7d856e547d1
+      name: Site client onboarding top failure reason
+      type: DEPENDENT
+      key: central.site.client_onboarding.top_reason
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.top_reason
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.site.client_onboarding.raw
 
   - uuid: 06555628289844408980746ebc6ea54c
     template: HPE Aruba Central NG - DeviceType AP
@@ -614,8 +746,7 @@ zabbix_export:
         key: central.device.raw
       triggers:
       - uuid: 53286e7531334cd981ce39ac8d04e98d
-        expression: last(/HPE Aruba Central NG - DeviceType AP/central.ap.radio_down_count)>0
-          and last(/HPE Aruba Central NG - DeviceType AP/central.device.status)="ONLINE"
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.ap.radio_down_count)>0 and last(/HPE Aruba Central NG - DeviceType AP/central.device.status)="ONLINE" and last(/HPE Aruba Central NG - DeviceType AP/central.ap.hibernate)<>"true"
         name: 'AP {HOST.NAME}: one or more radios are down'
         priority: AVERAGE
     - uuid: 60b5f07f642d4170859605ca25d1f266
@@ -696,6 +827,219 @@ zabbix_export:
         name: 'AP {HOST.NAME}: high memory utilization'
         priority: WARNING
         status: DISABLED
+    - uuid: dac8a5f36c1a4bb7899d4a54efd3529e
+      name: AP hibernate mode
+      type: DEPENDENT
+      key: central.ap.hibernate
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.hibernate
+      master_item:
+        key: central.device.raw
+    - uuid: 7ebea1d673ef4507b67a682d0f7313a4
+      name: AP uplink port status
+      type: DEPENDENT
+      key: central.ap.uplink_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uplink_status
+      master_item:
+        key: central.device.raw
+    - uuid: 9fe7d49572894ff7b07ce66642f3a1a7
+      name: AP uplink port speed
+      type: DEPENDENT
+      key: central.ap.uplink_speed_mbps
+      value_type: FLOAT
+      units: Mbps
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uplink_speed_mbps
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 50586a7209cd42758d032cb42f19be50
+        expression: last(/HPE Aruba Central NG - DeviceType AP/central.ap.uplink_speed_mbps)>0 and last(/HPE Aruba Central NG - DeviceType AP/central.ap.uplink_speed_mbps)<1000 and last(/HPE Aruba Central NG - DeviceType AP/central.device.status)="ONLINE"
+        name: 'AP {HOST.NAME}: uplink port speed is below 1 Gbps'
+        priority: WARNING
+        status: DISABLED
+    - uuid: 9b6a6bf480e142b3be833316a69c629d
+      name: AP uplink port duplex
+      type: DEPENDENT
+      key: central.ap.uplink_duplex
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uplink_duplex
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: d01a85cd5cfd4cdaa2b215aafaf020c0
+        expression: '(last(/HPE Aruba Central NG - DeviceType AP/central.ap.uplink_duplex)="Half" or last(/HPE Aruba Central NG - DeviceType AP/central.ap.uplink_duplex)="HALF") and last(/HPE Aruba Central NG - DeviceType AP/central.device.status)="ONLINE"'
+        name: 'AP {HOST.NAME}: uplink port is running in half duplex'
+        priority: WARNING
+    - uuid: 619e2deb4992460197f0a9a52f8b1552
+      name: AP max radio channel utilization
+      type: DEPENDENT
+      key: central.ap.max_radio_channel_utilization
+      value_type: FLOAT
+      units: '%'
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.max_radio_channel_utilization
+        error_handler: DISCARD_VALUE
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: d02254bdcc8c4038a9cc6ce970c5f022
+        expression: min(/HPE Aruba Central NG - DeviceType AP/central.ap.max_radio_channel_utilization,15m)>85
+        name: 'AP {HOST.NAME}: high radio channel utilization (> 85%)'
+        priority: WARNING
+        status: DISABLED
+    - uuid: a6b1d383a3974cc2ab6a0f425197eb53
+      name: AP gateway cluster
+      type: DEPENDENT
+      key: central.ap.gateway_cluster
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.gateway_cluster
+      master_item:
+        key: central.device.raw
+    discovery_rules:
+    - uuid: 2dc83848a79347b4a3b9520c7ea57b99
+      name: AP radio discovery
+      type: DEPENDENT
+      key: central.ap.radio.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.data.radios
+      lld_macro_paths:
+      - lld_macro: '{#RADIO_ID}'
+        path: $.id
+      - lld_macro: '{#RADIO_NAME}'
+        path: $.name
+      - lld_macro: '{#RADIO_BAND}'
+        path: $.band
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: ee80bcb73cdc4398af79ad10b207a39e
+        name: 'AP {#RADIO_NAME}: status'
+        type: DEPENDENT
+        key: 'central.ap.radio.status[{#RADIO_ID}]'
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.radios[?(@.id == "{#RADIO_ID}")].status.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: radio
+      - uuid: ebd4c18489a344bc83891f1f1cf35128
+        name: 'AP {#RADIO_NAME}: channel'
+        type: DEPENDENT
+        key: 'central.ap.radio.channel[{#RADIO_ID}]'
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.radios[?(@.id == "{#RADIO_ID}")].channel.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: radio
+      - uuid: 96e984665bda4d63bcf7321a1bb80df6
+        name: 'AP {#RADIO_NAME}: bandwidth'
+        type: DEPENDENT
+        key: 'central.ap.radio.bandwidth[{#RADIO_ID}]'
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.radios[?(@.id == "{#RADIO_ID}")].bandwidth.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: radio
+      - uuid: d4977c0d4afc420abf36142952ab746b
+        name: 'AP {#RADIO_NAME}: transmit power'
+        type: DEPENDENT
+        key: 'central.ap.radio.power_dbm[{#RADIO_ID}]'
+        value_type: FLOAT
+        units: dBm
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.radios[?(@.id == "{#RADIO_ID}")].power_dbm.first()'
+          error_handler: DISCARD_VALUE
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: radio
+      - uuid: ec723d7461774507929569c9cfe5b9b7
+        name: 'AP {#RADIO_NAME}: channel utilization'
+        type: DEPENDENT
+        key: 'central.ap.radio.channel_utilization[{#RADIO_ID}]'
+        value_type: FLOAT
+        units: '%'
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.radios[?(@.id == "{#RADIO_ID}")].channel_utilization.first()'
+          error_handler: DISCARD_VALUE
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: radio
+      - uuid: c6cece6c121b4b328d2b1ac9ec7c820d
+        name: 'AP {#RADIO_NAME}: noise floor'
+        type: DEPENDENT
+        key: 'central.ap.radio.noise_floor[{#RADIO_ID}]'
+        value_type: FLOAT
+        units: dBm
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.radios[?(@.id == "{#RADIO_ID}")].noise_floor.first()'
+          error_handler: DISCARD_VALUE
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: radio
+      - uuid: 66b116d460bc47fea23c518efc73b28c
+        name: 'AP {#RADIO_NAME}: client count'
+        type: DEPENDENT
+        key: 'central.ap.radio.client_count[{#RADIO_ID}]'
+        value_type: UNSIGNED
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.data.radios[?(@.id == "{#RADIO_ID}")].client_count.first()'
+          error_handler: DISCARD_VALUE
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: radio
 
   - uuid: db297f5e6595423a91f8c960f754f1f3
     template: HPE Aruba Central NG - DeviceType Switch
@@ -1147,6 +1491,77 @@ zabbix_export:
         name: 'Switch {HOST.NAME}: config status is not in sync'
         priority: INFO
         status: DISABLED
+    - uuid: b1b6145505294b969bb2ace48ae99080
+      name: Switch health status
+      type: DEPENDENT
+      key: central.switch.health
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.health
+      master_item:
+        key: central.device.raw
+    - uuid: 7cd2efe3c23c4da5a14a60758b126614
+      name: Switch health reasons
+      type: DEPENDENT
+      key: central.switch.health_reasons
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.health_reasons
+      master_item:
+        key: central.device.raw
+    - uuid: c32b6df9682b484fb88cb578dc113945
+      name: Switch part number
+      type: DEPENDENT
+      key: central.switch.part_number
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.part_number
+      master_item:
+        key: central.device.raw
+    - uuid: afa155d391f74e45b084a76877d2691b
+      name: Switch role
+      type: DEPENDENT
+      key: central.switch.role
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.role
+      master_item:
+        key: central.device.raw
+    - uuid: 6383f817b9084d9aa62cae6c41edca50
+      name: Switch PoE active port count
+      type: DEPENDENT
+      key: central.switch.poe_active_port_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.poe_active_port_count
+      master_item:
+        key: central.device.raw
+    - uuid: 65d0d4c154404d08844c351670042142
+      name: Switch PoE fault port count
+      type: DEPENDENT
+      key: central.switch.poe_fault_port_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.poe_fault_port_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 9cbebf88f7cc4dcc82d59c7a58bbf456
+        expression: last(/HPE Aruba Central NG - DeviceType Switch/central.switch.poe_fault_port_count)>0 and last(/HPE Aruba Central NG - DeviceType Switch/central.device.status)="ONLINE"
+        name: 'Switch {HOST.NAME}: one or more PoE ports reported a fault'
+        priority: WARNING
     discovery_rules:
     - uuid: a86c0ac4f3ef407ba81bae2201ccd89e
       name: Switch uplink discovery
@@ -2173,3 +2588,177 @@ zabbix_export:
         - $.summary.port_count
       master_item:
         key: central.device.raw
+    - uuid: a37f66b6a8c44f5ca9b3f1b54c9726db
+      name: Gateway health status
+      type: DEPENDENT
+      key: central.gateway.health
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.health
+      master_item:
+        key: central.device.raw
+    - uuid: 4ce1005dcf9f4a2bb551b2022907b204
+      name: Gateway config status
+      type: DEPENDENT
+      key: central.device.config_status
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.config_status
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: e74540d3b9c2443f933383987649625c
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.device.config_status)<>"" and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.config_status)<>"IN_SYNC" and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.config_status)<>"Synchronized" and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.config_status)<>"SYNCHRONIZED"
+        name: 'Gateway {HOST.NAME}: config status is not in sync'
+        priority: INFO
+        status: DISABLED
+    - uuid: 6380767a6ca64b06a663d81d2718715f
+      name: Gateway role
+      type: DEPENDENT
+      key: central.gateway.role
+      value_type: CHAR
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.role
+      master_item:
+        key: central.device.raw
+    - uuid: 552b56d2f1984afeb8f8bc2780e4d696
+      name: Gateway WAN uplink count
+      type: DEPENDENT
+      key: central.gateway.uplink_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uplink_count
+      master_item:
+        key: central.device.raw
+    - uuid: ce43c124fe824b69ad34b34ad584c91d
+      name: Gateway WAN uplink down count
+      type: DEPENDENT
+      key: central.gateway.uplink_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.uplink_down_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 0f8fbb7746634b3f949881126378a357
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.gateway.uplink_down_count)>0 and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)="ONLINE"
+        name: 'Gateway {HOST.NAME}: one or more WAN uplinks are down'
+        priority: AVERAGE
+    - uuid: a9dafa578a7a4f5f8b9aaa4237a5f5e8
+      name: Gateway tunnel count
+      type: DEPENDENT
+      key: central.gateway.tunnel_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.tunnel_count
+      master_item:
+        key: central.device.raw
+    - uuid: b73fed87170848658711905594f39f47
+      name: Gateway tunnel down count
+      type: DEPENDENT
+      key: central.gateway.tunnel_down_count
+      value_type: UNSIGNED
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.summary.tunnel_down_count
+      master_item:
+        key: central.device.raw
+      triggers:
+      - uuid: 61d09daabd894d919a657dd7735e52f1
+        expression: last(/HPE Aruba Central NG - DeviceType Gateway/central.gateway.tunnel_down_count)>0 and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)="ONLINE"
+        name: 'Gateway {HOST.NAME}: one or more tunnels are down'
+        priority: WARNING
+        status: DISABLED
+    discovery_rules:
+    - uuid: 9c56f382c7f04df896c0380e8c1f2b54
+      name: Gateway WAN uplink discovery
+      type: DEPENDENT
+      key: central.gateway.uplink.discovery
+      delay: '0'
+      lifetime: 30d
+      preprocessing:
+      - type: JSONPATH
+        parameters:
+        - $.uplinks
+      lld_macro_paths:
+      - lld_macro: '{#UPLINK_ID}'
+        path: $.id
+      - lld_macro: '{#UPLINK_NAME}'
+        path: $.name
+      master_item:
+        key: central.device.raw
+      item_prototypes:
+      - uuid: f55cef02c35947ecbf2a33120422944d
+        name: 'Gateway WAN uplink {#UPLINK_NAME}: link status'
+        type: DEPENDENT
+        key: 'central.gateway.uplink.status[{#UPLINK_ID}]'
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].link_status.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: uplink
+        trigger_prototypes:
+        - uuid: 167f2dc4f331417e98af1c1279193acf
+          expression: 'last(/HPE Aruba Central NG - DeviceType Gateway/central.gateway.uplink.oper_status[{#UPLINK_ID}])<>"Up" and last(/HPE Aruba Central NG - DeviceType Gateway/central.gateway.uplink.oper_status[{#UPLINK_ID}])<>"UP" and last(/HPE Aruba Central NG - DeviceType Gateway/central.gateway.uplink.oper_status[{#UPLINK_ID}])<>"ONLINE" and last(/HPE Aruba Central NG - DeviceType Gateway/central.device.status)="ONLINE"'
+          name: 'Gateway {HOST.NAME}: WAN uplink {#UPLINK_NAME} operational state is not Up'
+          priority: WARNING
+      - uuid: c3f0d706100b4633934684dfd5a14a1d
+        name: 'Gateway WAN uplink {#UPLINK_NAME}: operational state'
+        type: DEPENDENT
+        key: 'central.gateway.uplink.oper_status[{#UPLINK_ID}]'
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].oper_state.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: uplink
+      - uuid: 9e4bda277d8e4ef1b866ae2553f57b1f
+        name: 'Gateway WAN uplink {#UPLINK_NAME}: provider'
+        type: DEPENDENT
+        key: 'central.gateway.uplink.provider[{#UPLINK_ID}]'
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].provider.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: uplink
+      - uuid: 8c72720f143844c7b30d79f0561de7ce
+        name: 'Gateway WAN uplink {#UPLINK_NAME}: public IP'
+        type: DEPENDENT
+        key: 'central.gateway.uplink.public_ip[{#UPLINK_ID}]'
+        value_type: CHAR
+        preprocessing:
+        - type: JSONPATH
+          parameters:
+          - '$.uplinks[?(@.id == "{#UPLINK_ID}")].public_ip.first()'
+        master_item:
+          key: central.device.raw
+        tags:
+        - tag: component
+          value: uplink
